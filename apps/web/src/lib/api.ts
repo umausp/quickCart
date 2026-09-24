@@ -1,7 +1,38 @@
 import "server-only";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import type { AuthTokens } from "@quickcart/contracts";
 import { API_BASE_URL } from "./config";
 import { clearSession, getSession, setSession, type Session } from "./session";
+
+type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
+
+/** The minimal shape of a Cloudflare Service Binding this file uses — declared locally
+ * (not `@cloudflare/workers-types`) so `apps/web` stays free of a Workers-only dependency,
+ * same reasoning as `KVNamespaceLike` in `packages/domain/src/kv-repositories.ts`. */
+interface FetcherLike {
+  fetch: FetchLike;
+}
+
+/**
+ * On the Cloudflare deployment, `quickcart-web` and `quickcart-api` are both Workers on the
+ * same `*.workers.dev` zone — Cloudflare rejects a Worker `fetch()`-ing another Worker's
+ * public URL directly with error 1042 (same-zone loop prevention; the exact issue
+ * `apps/api/src/worker.ts` hit calling the retailer MCP Workers, see
+ * CLOUDFLARE-MIGRATION-PLAN.md). The fix is the same: a Service Binding
+ * (`API_SERVICE` in `wrangler.jsonc`) whose `.fetch` bypasses the public internet entirely.
+ * `getCloudflareContext` throws outside a Workers runtime (plain `next dev`/`next start`),
+ * so this falls back to the global `fetch` there — both deployments keep working unchanged.
+ */
+async function resolveFetch(): Promise<FetchLike> {
+  try {
+    const { env } = await getCloudflareContext({ async: true });
+    const service = (env as { API_SERVICE?: FetcherLike }).API_SERVICE;
+    if (service) return service.fetch.bind(service);
+  } catch {
+    // Not running on Workers — plain `next dev`/`next start` talks to the API over the network.
+  }
+  return fetch;
+}
 
 export class ApiError extends Error {
   constructor(
@@ -24,7 +55,8 @@ async function rawFetch(path: string, init: RequestInit & { accessToken?: string
   const headers = new Headers(init.headers);
   if (init.accessToken) headers.set("Authorization", `Bearer ${init.accessToken}`);
   if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-  return fetch(`${API_BASE_URL}${path}`, { ...init, headers, cache: "no-store" });
+  const fetchImpl = await resolveFetch();
+  return fetchImpl(`${API_BASE_URL}${path}`, { ...init, headers, cache: "no-store" });
 }
 
 async function toResult<T>(res: Response): Promise<T> {

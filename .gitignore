@@ -8,3 +8,6 @@ out/
 .env.local
 .DS_Store
 coverage/
+.wrangler/
+.open-next/
+*.tsbuildinfo

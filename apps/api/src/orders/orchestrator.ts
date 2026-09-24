@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { Inject, Injectable } from "@nestjs/common";
 import type { AggregationGateway } from "@quickcart/aggregation-core";
 import { SOURCE_META, type AddressSnapshot, type CartLine, type Location, type Order, type OrderStatus, type SourceId, type SubOrder, type SubOrderItem } from "@quickcart/contracts";
@@ -51,7 +50,7 @@ async function placeSubOrder(
     const subtotalPaise = lines.reduce((sum, l) => sum + l.unitPricePaise * l.qty, 0);
 
     return {
-      subOrderId: randomUUID(),
+      subOrderId: crypto.randomUUID(),
       sourceId,
       mode,
       status: confirmed ? "CONFIRMED" : "OUT_OF_STOCK",
@@ -65,7 +64,7 @@ async function placeSubOrder(
   } catch (err) {
     console.warn(`[orders] sub-order failed for ${sourceId}:`, err instanceof Error ? err.message : err);
     return {
-      subOrderId: randomUUID(),
+      subOrderId: crypto.randomUUID(),
       sourceId,
       mode,
       status: "FAILED",
@@ -100,7 +99,7 @@ export class OrderOrchestrator {
 
   async placeOrder(opts: PlaceOrderOptions): Promise<Order> {
     const groups = groupLinesBySource(opts.lines);
-    const paymentToken = `tok_${randomUUID()}`;
+    const paymentToken = `tok_${crypto.randomUUID()}`;
 
     const subOrders = await Promise.all(
       [...groups.entries()].map(([sourceId, lines]) => placeSubOrder(sourceId, lines, this.aggregation, opts.location, opts.address, paymentToken)),
@@ -116,7 +115,7 @@ export class OrderOrchestrator {
 
     const now = new Date().toISOString();
     return {
-      orderId: randomUUID(),
+      orderId: crypto.randomUUID(),
       userId: opts.userId,
       status,
       combinedEtaMinutes: etas.length ? Math.max(...etas) : null,

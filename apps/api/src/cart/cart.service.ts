@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { AggregationGateway } from "@quickcart/aggregation-core";
 import { buildCartView, emptyCart, type CartRepositoryPort } from "@quickcart/domain";
@@ -45,7 +44,7 @@ export class CartService {
       existing.deliveryFeePaise = product.deliveryFeePaise;
     } else {
       const line: CartLine = {
-        lineId: randomUUID(),
+        lineId: crypto.randomUUID(),
         canonicalSku: product.canonicalSku,
         sourceId: product.sourceId,
         sourceProductId: product.sourceProductId,
@@ -102,7 +101,7 @@ export class CartService {
   private async getOrCreateCart(userId: string): Promise<Cart> {
     const existing = await this.carts.findByUserId(userId);
     if (existing) return existing;
-    const created = emptyCart(randomUUID(), userId);
+    const created = emptyCart(crypto.randomUUID(), userId);
     return this.carts.save(created);
   }
 

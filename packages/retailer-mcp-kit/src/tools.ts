@@ -24,9 +24,10 @@ import {
   SearchProductsOutputSchema,
   type SourceProduct,
 } from "@quickcart/contracts";
-import { effectivePrice, etaMinutesOf, inStockOf, type LiveItem, type RetailerStore } from "./store.js";
+import { effectivePrice, etaMinutesOf, inStockOf, type LiveItem } from "./store.js";
+import type { RetailerStorePort } from "./store-port.js";
 
-function toSourceProduct(store: RetailerStore, item: LiveItem): SourceProduct {
+function toSourceProduct(store: RetailerStorePort, item: LiveItem): SourceProduct {
   return {
     sourceId: store.sourceId,
     sourceProductId: item.sourceProductId,
@@ -50,19 +51,24 @@ function toSourceProduct(store: RetailerStore, item: LiveItem): SourceProduct {
   };
 }
 
-/** Builds the unified 11-tool contract (Doc 04) against one retailer's in-memory store. */
-export function buildRetailerTools(store: RetailerStore): ToolDefinition[] {
+/** Builds the unified 11-tool contract (Doc 04) against any `RetailerStorePort` — the
+ * in-memory `RetailerStore` (Node deployment) or `KvRetailerStore` (Cloudflare deployment).
+ * Every handler `await`s the store, so it works identically against either backing. */
+export function buildRetailerTools(store: RetailerStorePort): ToolDefinition[] {
   return [
     defineTool({
       name: "search_products",
       description: "Search this retailer's catalogue by free-text query, scoped to a delivery location.",
       input: SearchProductsInputSchema,
       output: SearchProductsOutputSchema,
-      handler: ({ query, limit }) => ({
-        sourceId: store.sourceId,
-        products: store.search(query, limit).map((item) => toSourceProduct(store, item)),
-        fetchedAt: new Date().toISOString(),
-      }),
+      handler: async ({ query, limit }) => {
+        const items = await store.search(query, limit);
+        return {
+          sourceId: store.sourceId,
+          products: items.map((item) => toSourceProduct(store, item)),
+          fetchedAt: new Date().toISOString(),
+        };
+      },
     }),
 
     defineTool({
@@ -70,8 +76,8 @@ export function buildRetailerTools(store: RetailerStore): ToolDefinition[] {
       description: "Fetch full detail for one product by this retailer's own product id.",
       input: GetProductInputSchema,
       output: GetProductOutputSchema,
-      handler: ({ sourceProductId }) => {
-        const item = store.find(sourceProductId);
+      handler: async ({ sourceProductId }) => {
+        const item = await store.find(sourceProductId);
         return { product: item ? toSourceProduct(store, item) : null };
       },
     }),
@@ -81,8 +87,8 @@ export function buildRetailerTools(store: RetailerStore): ToolDefinition[] {
       description: "Current MRP, selling price and effective (post-offer) price for a product.",
       input: GetPriceInputSchema,
       output: GetPriceOutputSchema,
-      handler: ({ sourceProductId }) => {
-        const item = mustFind(store, sourceProductId);
+      handler: async ({ sourceProductId }) => {
+        const item = await mustFind(store, sourceProductId);
         return {
           mrpPaise: item.mrpPaise,
           sellingPricePaise: item.sellingPricePaise,
@@ -97,8 +103,8 @@ export function buildRetailerTools(store: RetailerStore): ToolDefinition[] {
       description: "Live, location-scoped stock for a product (shortest-TTL signal).",
       input: CheckStockInputSchema,
       output: CheckStockOutputSchema,
-      handler: ({ sourceProductId }) => {
-        const item = mustFind(store, sourceProductId);
+      handler: async ({ sourceProductId }) => {
+        const item = await mustFind(store, sourceProductId);
         return {
           inStock: inStockOf(item),
           quantityAvailable: item.liveStockQty,
@@ -112,8 +118,8 @@ export function buildRetailerTools(store: RetailerStore): ToolDefinition[] {
       description: "Real-time delivery estimate for a product at a location.",
       input: GetDeliveryEstimateInputSchema,
       output: GetDeliveryEstimateOutputSchema,
-      handler: ({ sourceProductId }) => {
-        const item = mustFind(store, sourceProductId);
+      handler: async ({ sourceProductId }) => {
+        const item = await mustFind(store, sourceProductId);
         const minutes = inStockOf(item) ? etaMinutesOf(item) : null;
         return {
           minutes: item.etaMinutesBase != null ? minutes : null,
@@ -128,8 +134,8 @@ export function buildRetailerTools(store: RetailerStore): ToolDefinition[] {
       description: "Coupons and auto-applied discounts for a product at a location.",
       input: GetOffersInputSchema,
       output: GetOffersOutputSchema,
-      handler: ({ sourceProductId }) => {
-        const item = mustFind(store, sourceProductId);
+      handler: async ({ sourceProductId }) => {
+        const item = await mustFind(store, sourceProductId);
         const offers = [];
         if (item.couponCode) {
           offers.push({
@@ -152,7 +158,7 @@ export function buildRetailerTools(store: RetailerStore): ToolDefinition[] {
       description: "The category tree this retailer sells under.",
       input: ListCategoriesInputSchema,
       output: ListCategoriesOutputSchema,
-      handler: () => ({ categories: store.categories }),
+      handler: async () => ({ categories: store.categories }),
     }),
 
     defineTool({
@@ -160,8 +166,8 @@ export function buildRetailerTools(store: RetailerStore): ToolDefinition[] {
       description: "Paged product listing for one category — powers browse and catalogue crawl.",
       input: ListProductsByCategoryInputSchema,
       output: ListProductsByCategoryOutputSchema,
-      handler: ({ categoryId, cursor, limit }) => {
-        const { page, nextCursor } = store.byCategory(categoryId, cursor, limit);
+      handler: async ({ categoryId, cursor, limit }) => {
+        const { page, nextCursor } = await store.byCategory(categoryId, cursor, limit);
         return { products: page.map((item) => toSourceProduct(store, item)), nextCursor };
       },
     }),
@@ -171,7 +177,7 @@ export function buildRetailerTools(store: RetailerStore): ToolDefinition[] {
       description: "Open a new server-side cart on this retailer for a delivery location.",
       input: CreateCartInputSchema,
       output: CreateCartOutputSchema,
-      handler: ({ location }) => ({ cartId: store.createCart(location.pincode) }),
+      handler: async ({ location }) => ({ cartId: await store.createCart(location.pincode) }),
     }),
 
     defineTool({
@@ -179,8 +185,8 @@ export function buildRetailerTools(store: RetailerStore): ToolDefinition[] {
       description: "Add a quantity of one product to a retailer-side cart.",
       input: AddToCartInputSchema,
       output: AddToCartOutputSchema,
-      handler: ({ cartId, sourceProductId, qty }) => {
-        const cart = store.addToCart(cartId, sourceProductId, qty);
+      handler: async ({ cartId, sourceProductId, qty }) => {
+        const cart = await store.addToCart(cartId, sourceProductId, qty);
         const subtotalPaise = cart.lines.reduce((sum, l) => sum + l.unitPricePaise * l.qty, 0);
         return { cartId, lineItems: cart.lines, subtotalPaise };
       },
@@ -191,8 +197,8 @@ export function buildRetailerTools(store: RetailerStore): ToolDefinition[] {
       description: "Place the order for everything in this retailer's cart; re-verifies stock before confirming.",
       input: CheckoutInputSchema,
       output: CheckoutOutputSchema,
-      handler: ({ cartId }) => {
-        const order = store.checkout(cartId);
+      handler: async ({ cartId }) => {
+        const order = await store.checkout(cartId);
         return {
           orderId: order.orderId,
           status: order.status,
@@ -205,8 +211,8 @@ export function buildRetailerTools(store: RetailerStore): ToolDefinition[] {
   ];
 }
 
-function mustFind(store: RetailerStore, sourceProductId: string): LiveItem {
-  const item = store.find(sourceProductId);
+async function mustFind(store: RetailerStorePort, sourceProductId: string): Promise<LiveItem> {
+  const item = await store.find(sourceProductId);
   if (!item) throw new Error(`unknown_product:${sourceProductId}`);
   return item;
 }

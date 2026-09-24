@@ -3,6 +3,7 @@ export * from "./deadline.js";
 export * from "./circuit-breaker.js";
 export * from "./mcp-source-client.js";
 export * from "./in-memory-cache.js";
+export * from "./kv-cache.js";
 export * from "./gather.js";
 export * from "./catalogue-index.js";
 export * from "./aggregation-gateway.js";

@@ -1,5 +1,5 @@
 import type { McpToolName, SourceId } from "@quickcart/contracts";
-import { McpCircuitOpenError, McpDeadlineExceededError } from "@quickcart/mcp-toolkit";
+import { McpCircuitOpenError, McpDeadlineExceededError } from "@quickcart/mcp-toolkit/client";
 import type { CircuitBreaker } from "./circuit-breaker.js";
 import { withTimeout } from "./deadline.js";
 import type { SourceClientFactory } from "./ports.js";
@@ -54,7 +54,9 @@ export async function gatherFromSources<T>(opts: GatherOptions): Promise<GatherS
       return { sourceId, ok: true, value: s.value };
     }
     opts.breaker.recordFailure(sourceId);
-    return { sourceId, ok: false, error: s.reason instanceof Error ? s.reason.message : String(s.reason) };
+    const error = s.reason instanceof Error ? s.reason.message : String(s.reason);
+    console.error(`[gather] ${sourceId}:${opts.toolName} failed:`, error);
+    return { sourceId, ok: false, error };
   });
 
   return { results, sourcesQueried: opts.sources.length, sourcesReturned: results.filter((r) => r.ok).length };

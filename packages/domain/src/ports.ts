@@ -37,3 +37,20 @@ export interface OrderRepositoryPort {
   saveIdempotencyKey(key: string, orderId: string): Promise<void>;
   listByUser(userId: string): Promise<Order[]>;
 }
+
+/**
+ * OTP + refresh-token storage for `AuthService` — split out from the in-process `Map`s it
+ * used to hold directly. On Node those maps lived for the process's whole lifetime, which is
+ * indistinguishable from a real store; on Workers each isolate is its own process, so an OTP
+ * set by the isolate that handled `POST /v1/auth/otp` is invisible to whichever isolate
+ * happens to handle the following `POST /v1/auth/verify` — this port (and its KV adapter)
+ * is what makes that handshake actually work across two separate requests in production.
+ */
+export interface AuthStatePort {
+  getOtp(phone: string): Promise<{ otp: string; expiresAt: number } | null>;
+  setOtp(phone: string, record: { otp: string; expiresAt: number }): Promise<void>;
+  deleteOtp(phone: string): Promise<void>;
+  getRefreshToken(token: string): Promise<{ userId: string; expiresAt: number } | null>;
+  setRefreshToken(token: string, record: { userId: string; expiresAt: number }): Promise<void>;
+  deleteRefreshToken(token: string): Promise<void>;
+}

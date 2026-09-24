@@ -1,6 +1,5 @@
-import { randomUUID } from "node:crypto";
 import type { Address, Cart, Order, UpsertAddressInput, User } from "@quickcart/contracts";
-import type { AddressRepositoryPort, CartRepositoryPort, OrderRepositoryPort, UserRepositoryPort } from "./ports.js";
+import type { AddressRepositoryPort, AuthStatePort, CartRepositoryPort, OrderRepositoryPort, UserRepositoryPort } from "./ports.js";
 
 /**
  * In-process repository adapters — the ideation-scope default behind every port above. Data
@@ -23,7 +22,7 @@ export class InMemoryUserRepository implements UserRepositoryPort {
   }
 
   async create(user: Omit<User, "id" | "createdAt">): Promise<User> {
-    const created: User = { ...user, id: randomUUID(), createdAt: new Date().toISOString() };
+    const created: User = { ...user, id: crypto.randomUUID(), createdAt: new Date().toISOString() };
     this.byId.set(created.id, created);
     this.byPhone.set(created.phone, created.id);
     return created;
@@ -44,7 +43,7 @@ export class InMemoryAddressRepository implements AddressRepositoryPort {
   async create(userId: string, input: UpsertAddressInput): Promise<Address> {
     const now = new Date().toISOString();
     const isFirst = !(await this.listByUser(userId)).length;
-    const address: Address = { ...input, id: randomUUID(), userId, isDefault: input.isDefault || isFirst, createdAt: now, updatedAt: now };
+    const address: Address = { ...input, id: crypto.randomUUID(), userId, isDefault: input.isDefault || isFirst, createdAt: now, updatedAt: now };
     if (address.isDefault) await this.clearDefault(userId);
     this.byId.set(address.id, address);
     return address;
@@ -125,5 +124,34 @@ export class InMemoryOrderRepository implements OrderRepositoryPort {
 
   async listByUser(userId: string): Promise<Order[]> {
     return [...this.byId.values()].filter((o) => o.userId === userId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+}
+
+export class InMemoryAuthStateRepository implements AuthStatePort {
+  private readonly otps = new Map<string, { otp: string; expiresAt: number }>();
+  private readonly refreshTokens = new Map<string, { userId: string; expiresAt: number }>();
+
+  async getOtp(phone: string): Promise<{ otp: string; expiresAt: number } | null> {
+    return this.otps.get(phone) ?? null;
+  }
+
+  async setOtp(phone: string, record: { otp: string; expiresAt: number }): Promise<void> {
+    this.otps.set(phone, record);
+  }
+
+  async deleteOtp(phone: string): Promise<void> {
+    this.otps.delete(phone);
+  }
+
+  async getRefreshToken(token: string): Promise<{ userId: string; expiresAt: number } | null> {
+    return this.refreshTokens.get(token) ?? null;
+  }
+
+  async setRefreshToken(token: string, record: { userId: string; expiresAt: number }): Promise<void> {
+    this.refreshTokens.set(token, record);
+  }
+
+  async deleteRefreshToken(token: string): Promise<void> {
+    this.refreshTokens.delete(token);
   }
 }

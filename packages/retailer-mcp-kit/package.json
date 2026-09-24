@@ -6,7 +6,8 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./worker": { "types": "./dist/worker-index.d.ts", "default": "./dist/worker-index.js" }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

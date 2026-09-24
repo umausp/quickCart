@@ -1,5 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { McpToolError } from "./errors.js";
 
 export interface McpClientHandle {
@@ -8,10 +9,18 @@ export interface McpClientHandle {
   close: () => Promise<void>;
 }
 
-/** Opens a real MCP session (JSON-RPC 2.0 over Streamable HTTP) against one retailer server. */
-export async function connectMcpClient(opts: { sourceId: string; url: string; clientName: string }): Promise<McpClientHandle> {
+/**
+ * Opens a real MCP session (JSON-RPC 2.0 over Streamable HTTP) against one retailer server.
+ * `fetch` is injectable so a Cloudflare Workers caller can pass a **Service Binding**'s
+ * `.fetch` instead of the global one — Cloudflare blocks a Worker from `fetch()`-ing
+ * another Worker's public `*.workers.dev` URL directly (error 1042, same-zone loop
+ * prevention); Service Bindings are the supported Worker-to-Worker path, and they happen to
+ * implement this exact `(url, init) => Promise<Response>` shape already. The Node
+ * deployment omits `fetch` and gets the global one, unaffected.
+ */
+export async function connectMcpClient(opts: { sourceId: string; url: string; clientName: string; fetch?: FetchLike }): Promise<McpClientHandle> {
   const client = new Client({ name: opts.clientName, version: "1.0.0" });
-  const transport = new StreamableHTTPClientTransport(new URL(opts.url));
+  const transport = new StreamableHTTPClientTransport(new URL(opts.url), opts.fetch ? { fetch: opts.fetch } : undefined);
   await client.connect(transport);
   return {
     sourceId: opts.sourceId,

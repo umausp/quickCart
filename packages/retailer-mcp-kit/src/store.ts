@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
 import type { Category, SourceId } from "@quickcart/contracts";
 import type { RetailerCatalogItem } from "./seed-types.js";
+import type { RetailerStorePort } from "./store-port.js";
 
 export type LiveItem = RetailerCatalogItem & { liveStockQty: number | null };
 
@@ -59,7 +59,7 @@ function jitterMinutes(base: number): number {
  * and order table. This is intentionally simple (no external DB) — the point of this
  * ideation build is a *real* MCP protocol surface, not a production retailer backend.
  */
-export class RetailerStore {
+export class RetailerStore implements RetailerStorePort {
   readonly sourceId: SourceId;
   readonly categories: Category[];
   private readonly products = new Map<string, LiveItem>();
@@ -74,19 +74,24 @@ export class RetailerStore {
     }
   }
 
-  listAll(): LiveItem[] {
+  // Every method below is `async` purely to satisfy `RetailerStorePort` — the in-memory Map
+  // access itself is fully synchronous, so these resolve immediately. `KvRetailerStore`
+  // (kv-store.ts) implements the same port with real `await`s against Workers KV.
+
+  async listAll(): Promise<LiveItem[]> {
     return [...this.products.values()];
   }
 
-  find(sourceProductId: string): LiveItem | null {
+  async find(sourceProductId: string): Promise<LiveItem | null> {
     return this.products.get(sourceProductId) ?? null;
   }
 
-  search(query: string, limit: number): LiveItem[] {
+  async search(query: string, limit: number): Promise<LiveItem[]> {
     const q = query.trim().toLowerCase();
-    if (!q) return this.listAll().slice(0, limit);
+    const all = await this.listAll();
+    if (!q) return all.slice(0, limit);
     const terms = q.split(/\s+/).filter(Boolean);
-    return this.listAll()
+    return all
       .map((item) => {
         // canonicalSku is included so a shopper searching a plain-English category word
         // (e.g. "chips") finds products whose display title doesn't literally contain it
@@ -101,24 +106,24 @@ export class RetailerStore {
       .map((s) => s.item);
   }
 
-  byCategory(categoryId: string, cursor: string | null, limit: number): { page: LiveItem[]; nextCursor: string | null } {
-    const all = this.listAll().filter((p) => p.categoryId === categoryId);
+  async byCategory(categoryId: string, cursor: string | null, limit: number): Promise<{ page: LiveItem[]; nextCursor: string | null }> {
+    const all = (await this.listAll()).filter((p) => p.categoryId === categoryId);
     const start = cursor ? Number(cursor) : 0;
     const page = all.slice(start, start + limit);
     const nextIndex = start + limit;
     return { page, nextCursor: nextIndex < all.length ? String(nextIndex) : null };
   }
 
-  createCart(pincode: string): string {
-    const cartId = `${this.sourceId}_cart_${randomUUID()}`;
+  async createCart(pincode: string): Promise<string> {
+    const cartId = `${this.sourceId}_cart_${crypto.randomUUID()}`;
     this.carts.set(cartId, { cartId, pincode, lines: [], createdAt: new Date().toISOString() });
     return cartId;
   }
 
-  addToCart(cartId: string, sourceProductId: string, qty: number): StoredCart {
+  async addToCart(cartId: string, sourceProductId: string, qty: number): Promise<StoredCart> {
     const cart = this.carts.get(cartId);
     if (!cart) throw new Error(`unknown_cart:${cartId}`);
-    const product = this.find(sourceProductId);
+    const product = await this.find(sourceProductId);
     if (!product) throw new Error(`unknown_product:${sourceProductId}`);
 
     const unitPricePaise = effectivePrice(product);
@@ -129,7 +134,7 @@ export class RetailerStore {
   }
 
   /** Re-verifies stock line-by-line, reserves it, and creates an order record — atomically, in-process. */
-  checkout(cartId: string): StoredOrder {
+  async checkout(cartId: string): Promise<StoredOrder> {
     const cart = this.carts.get(cartId);
     if (!cart) throw new Error(`unknown_cart:${cartId}`);
 
@@ -141,7 +146,7 @@ export class RetailerStore {
     }));
 
     for (const line of cart.lines) {
-      const product = this.find(line.sourceProductId);
+      const product = await this.find(line.sourceProductId);
       if (!product || (product.liveStockQty !== null && product.liveStockQty < line.qty)) {
         return this.recordOrder(cartId, "REJECTED", items, 0, null);
       }
@@ -150,7 +155,7 @@ export class RetailerStore {
     let totalPaise = 0;
     let maxEta = 0;
     for (const line of cart.lines) {
-      const product = this.find(line.sourceProductId)!;
+      const product = (await this.find(line.sourceProductId))!;
       if (product.liveStockQty !== null) product.liveStockQty -= line.qty;
       totalPaise += line.unitPricePaise * line.qty + product.deliveryFeePaise;
       maxEta = Math.max(maxEta, etaMinutesOf(product));
@@ -158,13 +163,13 @@ export class RetailerStore {
     return this.recordOrder(cartId, "CONFIRMED", items, totalPaise, maxEta);
   }
 
-  getOrder(orderId: string): StoredOrder | null {
+  async getOrder(orderId: string): Promise<StoredOrder | null> {
     return this.orders.get(orderId) ?? null;
   }
 
   private recordOrder(cartId: string, status: "CONFIRMED" | "REJECTED", items: StoredOrderItem[], totalPaise: number, etaMinutes: number | null): StoredOrder {
     const order: StoredOrder = {
-      orderId: `${this.sourceId}_ord_${randomUUID()}`,
+      orderId: `${this.sourceId}_ord_${crypto.randomUUID()}`,
       cartId,
       status,
       items,

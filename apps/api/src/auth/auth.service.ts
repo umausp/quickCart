@@ -1,9 +1,8 @@
-import { randomUUID } from "node:crypto";
 import { Inject, Injectable, UnauthorizedException } from "@nestjs/common";
-import { JwtService } from "@nestjs/jwt";
-import type { UserRepositoryPort } from "@quickcart/domain";
+import type { AuthStatePort, UserRepositoryPort } from "@quickcart/domain";
 import type { AuthTokens, JwtClaims, RequestOtpInput, User, VerifyOtpInput } from "@quickcart/contracts";
-import { USER_REPOSITORY } from "./auth.tokens.js";
+import { AUTH_STATE, JWT_PORT, USER_REPOSITORY } from "./auth.tokens.js";
+import type { JwtPort } from "./jwt-port.js";
 
 const OTP_TTL_MS = 5 * 60_000;
 const REFRESH_TTL_MS = 30 * 24 * 3_600_000;
@@ -11,34 +10,27 @@ const REFRESH_TTL_MS = 30 * 24 * 3_600_000;
  * OTP → JWT handshake, minus the actual SMS provider — see README "simplifications"). */
 const FIXED_DEV_OTP = "1234";
 
-interface RefreshRecord {
-  userId: string;
-  expiresAt: number;
-}
-
 @Injectable()
 export class AuthService {
-  private readonly otps = new Map<string, { otp: string; expiresAt: number }>();
-  private readonly refreshTokens = new Map<string, RefreshRecord>();
-
   constructor(
     @Inject(USER_REPOSITORY) private readonly users: UserRepositoryPort,
-    private readonly jwt: JwtService,
+    @Inject(JWT_PORT) private readonly jwt: JwtPort,
+    @Inject(AUTH_STATE) private readonly authState: AuthStatePort,
   ) {}
 
-  requestOtp(input: RequestOtpInput): { sent: true; devOtp: string } {
-    this.otps.set(input.phone, { otp: FIXED_DEV_OTP, expiresAt: Date.now() + OTP_TTL_MS });
+  async requestOtp(input: RequestOtpInput): Promise<{ sent: true; devOtp: string }> {
+    await this.authState.setOtp(input.phone, { otp: FIXED_DEV_OTP, expiresAt: Date.now() + OTP_TTL_MS });
     console.log(`[auth] OTP for ${input.phone}: ${FIXED_DEV_OTP} (mock — no SMS provider in this ideation build)`);
     // devOtp is only ever returned so the demo UI can autofill it; a real build would never do this.
     return { sent: true, devOtp: FIXED_DEV_OTP };
   }
 
   async verifyOtp(input: VerifyOtpInput): Promise<AuthTokens> {
-    const record = this.otps.get(input.phone);
+    const record = await this.authState.getOtp(input.phone);
     if (!record || record.otp !== input.otp || Date.now() > record.expiresAt) {
       throw new UnauthorizedException({ error: "invalid_otp" });
     }
-    this.otps.delete(input.phone);
+    await this.authState.deleteOtp(input.phone);
 
     const user = (await this.users.findByPhone(input.phone)) ?? (await this.users.create({
       phone: input.phone,
@@ -50,20 +42,20 @@ export class AuthService {
   }
 
   async refresh(refreshToken: string): Promise<AuthTokens> {
-    const record = this.refreshTokens.get(refreshToken);
+    const record = await this.authState.getRefreshToken(refreshToken);
     if (!record || Date.now() > record.expiresAt) throw new UnauthorizedException({ error: "invalid_refresh_token" });
-    this.refreshTokens.delete(refreshToken); // one-time use — rotated on every refresh
+    await this.authState.deleteRefreshToken(refreshToken); // one-time use — rotated on every refresh
 
     const user = await this.users.findById(record.userId);
     if (!user) throw new UnauthorizedException({ error: "user_not_found" });
     return this.issueTokens(user);
   }
 
-  private issueTokens(user: User): AuthTokens {
+  private async issueTokens(user: User): Promise<AuthTokens> {
     const claims: JwtClaims = { sub: user.id, phone: user.phone, name: user.name, deliveryZone: user.defaultPincode };
-    const accessToken = this.jwt.sign(claims, { expiresIn: "15m" });
-    const refreshToken = randomUUID();
-    this.refreshTokens.set(refreshToken, { userId: user.id, expiresAt: Date.now() + REFRESH_TTL_MS });
+    const accessToken = await this.jwt.sign(claims, { expiresIn: "15m" });
+    const refreshToken = crypto.randomUUID();
+    await this.authState.setRefreshToken(refreshToken, { userId: user.id, expiresAt: Date.now() + REFRESH_TTL_MS });
     return { accessToken, refreshToken, user };
   }
 }

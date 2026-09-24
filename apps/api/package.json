@@ -9,6 +9,9 @@
     "start": "node dist/main.js",
     "lint": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:worker": "tsc -p tsconfig.worker.json",
+    "dev:worker": "wrangler dev",
+    "deploy:worker": "wrangler deploy",
     "clean": "rm -rf dist"
   },
   "dependencies": {
@@ -20,8 +23,13 @@
     "@quickcart/aggregation-core": "workspace:*",
     "@quickcart/contracts": "workspace:*",
     "@quickcart/domain": "workspace:*",
+    "@quickcart/mcp-toolkit": "workspace:^",
     "@quickcart/pricing-core": "workspace:*",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.15.1",
     "express": "^5.2.1",
+    "hono": "^4.13.9",
+    "jose": "^6.2.12",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
     "zod": "^3.25.0"

@@ -1,0 +1,7 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "quickcart-mcp-blinkit",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-09-24",
+  "kv_namespaces": [{ "binding": "RETAILERS_KV", "id": "8be2c06c1c8d4208ae870d3b30318899" }]
+}

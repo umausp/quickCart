@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "quickcart-api",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-09-24",
+  "kv_namespaces": [{ "binding": "API_KV", "id": "749060f6e4304cd6b423aeffceee19ec" }],
+  "services": [
+    { "binding": "BLINKIT_SERVICE", "service": "quickcart-mcp-blinkit" },
+    { "binding": "ZEPTO_SERVICE", "service": "quickcart-mcp-zepto" },
+    { "binding": "BIGBASKET_SERVICE", "service": "quickcart-mcp-bigbasket" },
+    { "binding": "FLIPKART_SERVICE", "service": "quickcart-mcp-flipkart" },
+    { "binding": "AMAZON_SERVICE", "service": "quickcart-mcp-amazon" }
+  ]
+}

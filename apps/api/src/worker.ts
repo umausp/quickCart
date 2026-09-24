@@ -15,6 +15,7 @@ import {
   AddToCartRequestSchema,
   PlaceOrderRequestSchema,
   RequestOtpSchema,
+  SOURCE_IDS,
   UpsertAddressSchema,
   VerifyOtpSchema,
   type JwtClaims,
@@ -32,6 +33,7 @@ import { OrderOrchestrator } from "./orders/orchestrator.js";
 import { OrdersService } from "./orders/orders.service.js";
 import { loadZeptoConfig } from "./zepto/zepto.config.js";
 import { ZeptoOAuthService } from "./zepto/zepto-oauth.service.js";
+import { searchRealZepto } from "./zepto/zepto-mcp-adapter.js";
 
 /**
  * The Cloudflare Workers entrypoint for the whole backend — same layered architecture
@@ -83,6 +85,7 @@ const DEFAULT_URLS: Record<SourceId, string> = {
   flipkart: "https://quickcart-mcp-flipkart.pathakumashankar.workers.dev/mcp",
   amazon: "https://quickcart-mcp-amazon.pathakumashankar.workers.dev/mcp",
 };
+const NON_ZEPTO_SOURCES: SourceId[] = SOURCE_IDS.filter((s) => s !== "zepto");
 
 interface Services {
   aggregation: AggregationGateway;
@@ -179,13 +182,32 @@ async function requireAuth(c: import("hono").Context<AppEnv>, next: () => Promis
 // ---- Gateway: search & product detail (public) --------------------------------------------
 
 app.get("/v1/search", async (c) => {
-  const { aggregation } = buildServices(c.env);
+  const { aggregation, jwt, zepto } = buildServices(c.env);
   const q = c.req.query("q") ?? "";
   const pincode = c.req.query("pincode") ?? DEFAULT_LOCATION.pincode;
   const limit = Number(c.req.query("limit")) || 20;
-  const { results, sourcesQueried } = await aggregation.search(q, { pincode }, limit);
+
+  const header = c.req.header("authorization") ?? "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : null;
+  const zeptoToken = token
+    ? await jwt
+        .verify<JwtClaims>(token)
+        .then((claims) => zepto.getValidAccessToken(claims.sub))
+        .catch(() => null)
+    : null;
+
+  const { results, sourcesQueried } = await aggregation.search(q, { pincode }, limit, zeptoToken ? { sources: NON_ZEPTO_SOURCES } : undefined);
   const products: SourceProduct[] = results.flatMap((r) => r.value ?? []);
-  return c.json(buildSearchResponse(q, products, sourcesQueried, weightsForMode(c.req.query("mode"))));
+
+  let finalProducts = products;
+  let finalSourcesQueried = sourcesQueried;
+  if (zeptoToken) {
+    const real = await searchRealZepto(zeptoToken, q, limit);
+    finalProducts = [...products, ...real];
+    finalSourcesQueried += 1;
+  }
+
+  return c.json(buildSearchResponse(q, finalProducts, finalSourcesQueried, weightsForMode(c.req.query("mode"))));
 });
 
 app.get("/v1/products/:sku/offers", async (c) => {

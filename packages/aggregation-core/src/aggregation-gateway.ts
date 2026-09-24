@@ -58,14 +58,22 @@ export class AggregationGateway {
     return this.catalogue.getCanonicalMeta(canonicalSku);
   }
 
-  /** Fans `search_products` out to every source; cache-first per (query, zone) (Doc 05 §2). */
-  async search(query: string, location: Location, limit = 10): Promise<GatherSummary<SourceProduct[]>> {
-    const cacheKey = `search:${location.pincode}:${query.toLowerCase()}`;
+  /**
+   * Fans `search_products` out to every source; cache-first per (query, zone) (Doc 05 §2).
+   * `opts.sources` lets a caller narrow the fan-out — used to exclude the shared, unauthenticated
+   * "zepto" source when the current shopper has a real, personally-connected Zepto account,
+   * whose live results are fetched separately (see `apps/api/src/zepto/zepto-mcp-adapter.ts`)
+   * and merged in by the caller instead. The source subset is part of the cache key so a
+   * guest's 5-source result can never be served to (or pollute) a connected shopper's request.
+   */
+  async search(query: string, location: Location, limit = 10, opts?: { sources?: SourceId[] }): Promise<GatherSummary<SourceProduct[]>> {
+    const sources = opts?.sources ?? this.sources;
+    const cacheKey = `search:${location.pincode}:${query.toLowerCase()}:${sources.join(",")}`;
     const cached = await this.opts.cache.get<GatherSummary<SourceProduct[]>>(cacheKey);
     if (cached) return cached;
 
     const summary = await gatherFromSources<SourceProduct[]>({
-      sources: this.sources,
+      sources,
       clientFactory: this.opts.clientFactory,
       breaker: this.breaker,
       toolName: "search_products",

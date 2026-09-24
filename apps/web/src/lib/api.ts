@@ -70,6 +70,14 @@ export async function apiPublic<T>(path: string, init: RequestInit = {}): Promis
   return toResult<T>(await rawFetch(path, init));
 }
 
+/** Auth-*optional*: attaches the session token when one exists, but never requires it —
+ * `/v1/search` uses a present token to merge in a connected shopper's real Zepto results,
+ * while staying just as callable for a guest with no session at all. */
+export async function apiOptionalAuth<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const session = await getSession();
+  return toResult<T>(await rawFetch(path, { ...init, accessToken: session?.accessToken }));
+}
+
 /**
  * Authenticated **read** — for use in Server Components rendering a page. Deliberately does
  * *not* attempt a token refresh: Next.js forbids mutating cookies outside a Server

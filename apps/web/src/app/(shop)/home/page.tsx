@@ -5,13 +5,13 @@ import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { DEFAULT_CATEGORIES, type SearchResponse } from "@quickcart/contracts";
 import { EmptyState } from "@quickcart/ui";
-import { apiPublic } from "../../../lib/api";
+import { apiOptionalAuth } from "../../../lib/api";
 import { SearchBox } from "../search/search-box";
 import { ResultCard } from "../result-card";
 import { CategoryLink } from "./category-link";
 
 export default async function HomePage() {
-  const deals = await apiPublic<SearchResponse>("/search?limit=8");
+  const deals = await apiOptionalAuth<SearchResponse>("/search?limit=8");
 
   return (
     <Container maxWidth="lg" sx={{ py: 3 }}>

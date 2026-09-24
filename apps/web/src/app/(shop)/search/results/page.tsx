@@ -4,7 +4,7 @@ import Grid from "@mui/material/Grid";
 import Typography from "@mui/material/Typography";
 import type { SearchResponse } from "@quickcart/contracts";
 import { EmptyState } from "@quickcart/ui";
-import { apiPublic } from "../../../../lib/api";
+import { apiOptionalAuth } from "../../../../lib/api";
 import { LinkChip } from "../../link-components";
 import { ResultCard } from "../../result-card";
 import { SearchBox } from "../search-box";
@@ -19,7 +19,7 @@ const MODES = [
 
 export default async function SearchResultsPage({ searchParams }: { searchParams: Promise<{ q?: string; mode?: string }> }) {
   const { q = "", mode = "balanced" } = await searchParams;
-  const response = await apiPublic<SearchResponse>(`/search?q=${encodeURIComponent(q)}&mode=${mode}&limit=20`);
+  const response = await apiOptionalAuth<SearchResponse>(`/search?q=${encodeURIComponent(q)}&mode=${mode}&limit=20`);
 
   return (
     <Container maxWidth="lg" sx={{ py: 3 }}>

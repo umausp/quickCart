@@ -11,6 +11,18 @@ The one thing that is **not** cut down for ideation: the MCP layer. `search`, pr
 detail, `cart`, and `checkout` all run over real MCP (JSON-RPC 2.0 via
 `@modelcontextprotocol/sdk`) against five real, independently-running MCP servers.
 
+## Live demo (Cloudflare, free tier)
+
+The whole stack — frontend, API, and all 5 MCP servers — also runs live on Cloudflare's free
+tier (Workers + Workers KV + Service Bindings, no Durable Objects/Containers/paid plan):
+
+**https://quickcart-web.pathakumashankar.workers.dev**
+
+Login is the same mock OTP flow described below (dev code `1234`). See
+[`CLOUDFLARE-MIGRATION-PLAN.md`](../CLOUDFLARE-MIGRATION-PLAN.md) for how each service was
+ported to run on Workers, and the production-only bugs (error 1042, isolate-local state,
+`kv.list()` consistency) that surfaced only once actually deployed.
+
 ## Architecture
 
 ```

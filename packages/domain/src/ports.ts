@@ -83,3 +83,30 @@ export interface ZeptoConnectionPort {
   saveConnection(userId: string, connection: ZeptoConnection): Promise<void>;
   deleteConnection(userId: string): Promise<void>;
 }
+
+/**
+ * Same shape as `ZeptoOAuthState`/`ZeptoConnection`/`ZeptoConnectionPort` above, generalised
+ * instead of copy-pasted a second time now that Swiggy (a real, separate OAuth provider —
+ * `mcp.swiggy.com`) needs the exact same thing. Left the Zepto-specific ones alone rather than
+ * migrating already-deployed code onto this — adapters take a `provider` string so one KV
+ * namespace/in-memory store can safely hold both providers' state without key collisions.
+ */
+export interface OAuthState {
+  codeVerifier: string;
+  userId: string | null;
+}
+
+export interface OAuthConnection {
+  accessToken: string;
+  refreshToken: string | null;
+  expiresAt: number;
+  connectedAt: string;
+}
+
+export interface OAuthConnectionPort {
+  saveState(state: string, value: OAuthState, ttlSeconds: number): Promise<void>;
+  consumeState(state: string): Promise<OAuthState | null>;
+  getConnection(userId: string): Promise<OAuthConnection | null>;
+  saveConnection(userId: string, connection: OAuthConnection): Promise<void>;
+  deleteConnection(userId: string): Promise<void>;
+}

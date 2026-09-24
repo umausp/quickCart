@@ -3,6 +3,9 @@ import type {
   AddressRepositoryPort,
   AuthStatePort,
   CartRepositoryPort,
+  OAuthConnection,
+  OAuthConnectionPort,
+  OAuthState,
   OrderRepositoryPort,
   UserRepositoryPort,
   ZeptoConnection,
@@ -185,6 +188,36 @@ export class InMemoryZeptoConnectionRepository implements ZeptoConnectionPort {
   }
 
   async saveConnection(userId: string, connection: ZeptoConnection): Promise<void> {
+    this.connections.set(userId, connection);
+  }
+
+  async deleteConnection(userId: string): Promise<void> {
+    this.connections.delete(userId);
+  }
+}
+
+/** Generic version of the class above — see `OAuthConnectionPort`'s doc comment. Used
+ * directly (no subclassing) by every OAuth provider besides Zepto. */
+export class InMemoryOAuthConnectionRepository implements OAuthConnectionPort {
+  private readonly states = new Map<string, { value: OAuthState; expiresAt: number }>();
+  private readonly connections = new Map<string, OAuthConnection>();
+
+  async saveState(state: string, value: OAuthState, ttlSeconds: number): Promise<void> {
+    this.states.set(state, { value, expiresAt: Date.now() + ttlSeconds * 1000 });
+  }
+
+  async consumeState(state: string): Promise<OAuthState | null> {
+    const record = this.states.get(state);
+    this.states.delete(state);
+    if (!record || Date.now() > record.expiresAt) return null;
+    return record.value;
+  }
+
+  async getConnection(userId: string): Promise<OAuthConnection | null> {
+    return this.connections.get(userId) ?? null;
+  }
+
+  async saveConnection(userId: string, connection: OAuthConnection): Promise<void> {
     this.connections.set(userId, connection);
   }
 

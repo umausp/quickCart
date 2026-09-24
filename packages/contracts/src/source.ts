@@ -4,7 +4,7 @@ import { z } from "zod";
  * The five platforms QuickCart aggregates (Doc 04). Every MCP adaptor identifies itself
  * with one of these ids; every Offer, CartLine and SubOrder is keyed by the same id.
  */
-export const SOURCE_IDS = ["blinkit", "zepto", "bigbasket", "flipkart", "amazon"] as const;
+export const SOURCE_IDS = ["blinkit", "zepto", "bigbasket", "flipkart", "amazon", "swiggy"] as const;
 
 export const SourceIdSchema = z.enum(SOURCE_IDS);
 export type SourceId = z.infer<typeof SourceIdSchema>;
@@ -27,4 +27,5 @@ export const SOURCE_META: Record<SourceId, SourceMeta> = {
   bigbasket: { id: "bigbasket", label: "BigBasket", color: "#84c225", fulfilment: "managed", tagline: "Deepest grocery catalogue" },
   flipkart: { id: "flipkart", label: "Flipkart", color: "#2874f0", fulfilment: "handoff", tagline: "Wide marketplace" },
   amazon: { id: "amazon", label: "Amazon", color: "#ff9900", fulfilment: "handoff", tagline: "Prime selection" },
+  swiggy: { id: "swiggy", label: "Swiggy Instamart", color: "#fc8019", fulfilment: "handoff", tagline: "Real MCP, real Instamart" },
 };

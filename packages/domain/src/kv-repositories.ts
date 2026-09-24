@@ -3,6 +3,9 @@ import type {
   AddressRepositoryPort,
   AuthStatePort,
   CartRepositoryPort,
+  OAuthConnection,
+  OAuthConnectionPort,
+  OAuthState,
   OrderRepositoryPort,
   UserRepositoryPort,
   ZeptoConnection,
@@ -249,5 +252,39 @@ export class KvZeptoConnectionRepository implements ZeptoConnectionPort {
 
   async deleteConnection(userId: string): Promise<void> {
     await this.kv.delete(`zepto-connection:${userId}`);
+  }
+}
+
+/** Generic version of the class above — see `OAuthConnectionPort`'s doc comment. `provider`
+ * namespaces the KV keys (e.g. "swiggy") so multiple providers can safely share one KV
+ * binding without colliding on state/connection keys. */
+export class KvOAuthConnectionRepository implements OAuthConnectionPort {
+  constructor(
+    private readonly kv: KVNamespaceLike,
+    private readonly provider: string,
+  ) {}
+
+  async saveState(state: string, value: OAuthState, ttlSeconds: number): Promise<void> {
+    await this.kv.put(`${this.provider}-oauth-state:${state}`, JSON.stringify(value), { expirationTtl: Math.max(60, ttlSeconds) });
+  }
+
+  async consumeState(state: string): Promise<OAuthState | null> {
+    const key = `${this.provider}-oauth-state:${state}`;
+    const raw = await this.kv.get(key);
+    await this.kv.delete(key);
+    return raw ? (JSON.parse(raw) as OAuthState) : null;
+  }
+
+  async getConnection(userId: string): Promise<OAuthConnection | null> {
+    const raw = await this.kv.get(`${this.provider}-connection:${userId}`);
+    return raw ? (JSON.parse(raw) as OAuthConnection) : null;
+  }
+
+  async saveConnection(userId: string, connection: OAuthConnection): Promise<void> {
+    await this.kv.put(`${this.provider}-connection:${userId}`, JSON.stringify(connection));
+  }
+
+  async deleteConnection(userId: string): Promise<void> {
+    await this.kv.delete(`${this.provider}-connection:${userId}`);
   }
 }

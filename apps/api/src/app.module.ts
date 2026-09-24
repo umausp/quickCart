@@ -4,9 +4,10 @@ import { AuthModule } from "./auth/auth.module.js";
 import { CartModule } from "./cart/cart.module.js";
 import { GatewayModule } from "./gateway/gateway.module.js";
 import { OrdersModule } from "./orders/orders.module.js";
+import { SwiggyModule } from "./swiggy/swiggy.module.js";
 import { ZeptoModule } from "./zepto/zepto.module.js";
 
 @Module({
-  imports: [GatewayModule, AuthModule, AddressesModule, CartModule, OrdersModule, ZeptoModule],
+  imports: [GatewayModule, AuthModule, AddressesModule, CartModule, OrdersModule, ZeptoModule, SwiggyModule],
 })
 export class AppModule {}

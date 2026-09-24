@@ -81,18 +81,22 @@ export async function apiOptionalAuth<T>(path: string, init: RequestInit = {}): 
 /**
  * Home/search need this to tell "no real results for this query yet" apart from "there's no
  * real data available to you at all" — very different messages. Deliberately checks
- * `hasRealData`, not `connected`: a visitor using the shared fallback owner's connection (see
- * ZeptoOAuthConfig.defaultOwnerUserId) already sees real results without connecting their own
- * account, so `connected` (which only means "*you* personally connected something") would
- * wrongly show a "connect to see real data" prompt even while real data is already flowing.
- * `false` for a guest or on any error; never throws.
+ * `hasRealData` across *every* real provider, not `connected`: a visitor using a shared
+ * fallback owner's connection (see `ZeptoOAuthConfig`/`SwiggyOAuthConfig.defaultOwnerUserId`)
+ * already sees real results without connecting their own account, so `connected` (which only
+ * means "*you* personally connected something") would wrongly show a "connect to see real
+ * data" prompt even while real data is already flowing from at least one provider. `false`
+ * for a guest or on any error; never throws.
  */
-export async function isZeptoConnected(): Promise<boolean> {
+export async function hasAnyRealData(): Promise<boolean> {
   const session = await getSession();
   if (!session) return false;
   try {
-    const status = await apiOptionalAuth<{ connected: boolean; hasRealData: boolean }>("/connections/zepto/status");
-    return status.hasRealData;
+    const [zepto, swiggy] = await Promise.all([
+      apiOptionalAuth<{ hasRealData: boolean }>("/connections/zepto/status"),
+      apiOptionalAuth<{ hasRealData: boolean }>("/connections/swiggy/status"),
+    ]);
+    return zepto.hasRealData || swiggy.hasRealData;
   } catch {
     return false;
   }

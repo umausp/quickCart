@@ -23,6 +23,7 @@ const RELIABILITY_BASELINE: Record<SourceId, number> = {
   bigbasket: 0.9,
   flipkart: 0.85,
   amazon: 0.9,
+  swiggy: 0.95, // real MCP, same quick-commerce live-stock guarantee as Zepto/Blinkit
 };
 
 /**

@@ -4,7 +4,7 @@ import Grid from "@mui/material/Grid";
 import Typography from "@mui/material/Typography";
 import type { SearchResponse } from "@quickcart/contracts";
 import { EmptyState } from "@quickcart/ui";
-import { apiOptionalAuth, isZeptoConnected } from "../../../../lib/api";
+import { apiOptionalAuth, hasAnyRealData } from "../../../../lib/api";
 import { LinkButton, LinkChip } from "../../link-components";
 import { ResultCard } from "../../result-card";
 import { SearchBox } from "../search-box";
@@ -21,7 +21,7 @@ export default async function SearchResultsPage({ searchParams }: { searchParams
   const { q = "", mode = "balanced" } = await searchParams;
   const [response, hasRealData] = await Promise.all([
     apiOptionalAuth<SearchResponse>(`/search?q=${encodeURIComponent(q)}&mode=${mode}&limit=20`),
-    isZeptoConnected(),
+    hasAnyRealData(),
   ]);
 
   return (
@@ -42,20 +42,20 @@ export default async function SearchResultsPage({ searchParams }: { searchParams
         </Stack>
 
         <Typography variant="caption" color="text.secondary">
-          {response.results.length} result{response.results.length === 1 ? "" : "s"} · {hasRealData ? "live from Zepto" : "no real data available"}
+          {response.results.length} result{response.results.length === 1 ? "" : "s"} · {hasRealData ? "live from Zepto & Swiggy" : "no real data available"}
         </Typography>
 
         {response.results.length === 0 ? (
           hasRealData ? (
-            <EmptyState icon="🔍" title="No results" subtitle={`Nothing matched "${q}" on Zepto right now.`} />
+            <EmptyState icon="🔍" title="No results" subtitle={`Nothing matched "${q}" right now.`} />
           ) : (
             <EmptyState
               icon="🔗"
-              title="Connect Zepto to search"
-              subtitle="QuickCart only shows real data — connect your account to start browsing."
+              title="Connect an account to search"
+              subtitle="QuickCart only shows real data — connect your Zepto or Swiggy account to start browsing."
               action={
                 <LinkButton href="/profile" variant="contained">
-                  Connect Zepto
+                  Connect an account
                 </LinkButton>
               }
             />

@@ -1,7 +1,8 @@
 /**
- * OAuth 2.1 + PKCE (RFC 7636) primitives for the real Zepto integration — pure Web Crypto, so
- * the exact same code runs unmodified on Node (`main.ts`) and on Workers (`worker.ts`), same
- * reasoning as `crypto.randomUUID()` elsewhere in this codebase.
+ * OAuth 2.1 + PKCE (RFC 7636) primitives shared by every real provider integration (Zepto,
+ * Swiggy, and whatever's next) — pure Web Crypto, so the exact same code runs unmodified on
+ * Node (`main.ts`) and on Workers (`worker.ts`), same reasoning as `crypto.randomUUID()`
+ * elsewhere in this codebase.
  */
 
 function base64url(bytes: Uint8Array): string {
@@ -25,10 +26,10 @@ export function randomState(): string {
 
 /**
  * Unverified decode of a JWT's `sub` claim — used only to derive a stable key for reattaching
- * the same QuickCart account on a repeat "Continue with Zepto" login. Never trusted for
- * authorization: every real Zepto MCP call still sends the token itself, which Zepto's own
- * server validates. If Zepto's access token isn't a decodable JWT, this just returns `null`
- * and the caller falls back to minting a fresh account for that login.
+ * the same QuickCart account on a repeat "Continue with <provider>" login. Never trusted for
+ * authorization: every real MCP call still sends the token itself, which the provider's own
+ * server validates. If the access token isn't a decodable JWT, this just returns `null` and
+ * the caller falls back to minting a fresh account for that login.
  */
 export function decodeJwtSubject(token: string): string | null {
   const parts = token.split(".");

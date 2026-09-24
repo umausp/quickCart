@@ -4,19 +4,19 @@ import Grid from "@mui/material/Grid";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { DEFAULT_CATEGORIES } from "@quickcart/contracts";
-import { isZeptoConnected } from "../../../lib/api";
+import { hasAnyRealData } from "../../../lib/api";
 import { SearchBox } from "../search/search-box";
 import { LinkButton } from "../link-components";
 import { CategoryLink } from "./category-link";
 
 /**
  * Categories-first home: no live "best deals" fetch here anymore — that was the slowest part
- * of every home-page load (a real Zepto search on every visit) for a section that's arguably
- * less useful than just letting the shopper pick where to start. Real product results now
- * only ever come from an explicit search.
+ * of every home-page load (a real search on every visit) for a section that's arguably less
+ * useful than just letting the shopper pick where to start. Real product results now only
+ * ever come from an explicit search.
  */
 export default async function HomePage() {
-  const hasRealData = await isZeptoConnected();
+  const hasRealData = await hasAnyRealData();
 
   return (
     <Container maxWidth="lg" sx={{ py: 3 }}>
@@ -33,7 +33,7 @@ export default async function HomePage() {
             Everything, in minutes ⚡
           </Typography>
           <Typography variant="body2" sx={{ opacity: 0.9, mb: 2 }}>
-            Real, live results from Zepto — no demo data.
+            Real, live results from Zepto &amp; Swiggy Instamart — no demo data.
           </Typography>
           <SearchBox action="/search/results" placeholder="Search milk, eggs, earbuds…" light />
         </Box>
@@ -54,15 +54,15 @@ export default async function HomePage() {
           >
             <Box>
               <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-                Connect a Zepto account
+                Connect a real account
               </Typography>
               <Typography variant="caption" color="text.secondary">
                 QuickCart only shows real data, and no shared account is available right now —
-                connect your own to start browsing.
+                connect your own Zepto or Swiggy account to start browsing.
               </Typography>
             </Box>
             <LinkButton href="/profile" variant="contained">
-              Connect Zepto
+              Connect an account
             </LinkButton>
           </Box>
         )}

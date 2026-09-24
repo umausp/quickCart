@@ -15,7 +15,10 @@ export class McpSourceClientFactory implements SourceClientFactory {
   private readonly handles = new Map<SourceId, Promise<McpClientHandle>>();
 
   constructor(
-    private readonly urls: Record<SourceId, string>,
+    // Partial, not every SourceId: sources that only ever resolve through a real, per-user
+    // OAuth connection (no shared/mock retailer Worker behind them — e.g. "swiggy") have no
+    // entry here at all, and are never connected through this factory in practice.
+    private readonly urls: Partial<Record<SourceId, string>>,
     private readonly clientName = "quickcart-aggregation",
     private readonly fetchOverrides: Partial<Record<SourceId, FetchLike>> = {},
   ) {}
@@ -24,6 +27,7 @@ export class McpSourceClientFactory implements SourceClientFactory {
     let pending = this.handles.get(sourceId);
     if (!pending) {
       const url = this.urls[sourceId];
+      if (!url) throw new Error(`[mcp-source-client] no shared MCP URL configured for source "${sourceId}"`);
       const fetchImpl = this.fetchOverrides[sourceId];
       pending = connectMcpClient({ sourceId, url, clientName: this.clientName, fetch: fetchImpl }).catch((err: unknown) => {
         this.handles.delete(sourceId);

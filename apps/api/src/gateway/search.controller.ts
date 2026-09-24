@@ -5,19 +5,20 @@ import { AGGREGATION_GATEWAY } from "../aggregation/aggregation.tokens.js";
 import { JWT_PORT } from "../auth/auth.tokens.js";
 import type { JwtPort } from "../auth/jwt-port.js";
 import { TransformService } from "../transform/transform.service.js";
+import { SwiggyOAuthService } from "../swiggy/swiggy-oauth.service.js";
+import { cachedSearchRealSwiggy } from "../swiggy/swiggy-mcp-adapter.js";
 import { ZeptoOAuthService } from "../zepto/zepto-oauth.service.js";
 import { searchRealZepto } from "../zepto/zepto-mcp-adapter.js";
 import { weightsForMode } from "./ranking-mode.js";
 
 /**
  * `GET /v1/search` — the List/Search-results screen's one endpoint. No mock data: this only
- * ever returns real MCP results. A shopper's own connected Zepto account is used first; a
- * visitor with none of their own falls back to the shared owner's connection
- * (`ZeptoOAuthConfig.defaultOwnerUserId` — an explicit, informed choice by that account's
- * owner, not a default anyone should add lightly). Only when there's no fallback configured
- * at all does this return an empty result set. Swiggy will join this list the moment
- * QuickCart has real API access to it (blocked on Swiggy's own invite-based application
- * process, not anything this code controls).
+ * ever returns real MCP results, fanned out to every real provider concurrently (this is the
+ * actual point of the whole project — comparing real prices across more than one real MCP
+ * source in one place). A shopper's own connected account is used first per provider; a
+ * visitor with none of their own falls back to that provider's shared owner connection (an
+ * explicit, informed choice by each account's owner, not a default to add lightly). A
+ * provider with no fallback configured and no personal connection simply contributes nothing.
  */
 @Controller()
 export class SearchController {
@@ -25,6 +26,7 @@ export class SearchController {
     @Inject(AGGREGATION_GATEWAY) private readonly aggregation: AggregationGateway,
     private readonly transform: TransformService,
     private readonly zepto: ZeptoOAuthService,
+    private readonly swiggy: SwiggyOAuthService,
     @Inject(JWT_PORT) private readonly jwt: JwtPort,
   ) {}
 
@@ -36,35 +38,42 @@ export class SearchController {
     @Headers("authorization") authHeader?: string,
   ): Promise<SearchResponse> {
     const requestedLimit = Number(limit) || 20;
-    const zepto = await this.getValidZeptoSession(authHeader);
+    const claims = await this.claimsFrom(authHeader);
 
-    const products: SourceProduct[] = zepto ? await this.cachedSearchRealZepto(zepto, q, requestedLimit) : [];
-    const sourcesQueried = zepto ? 1 : 0;
+    const [zeptoSession, swiggySession] = await Promise.all([
+      this.zepto.getValidAccessTokenWithFallback(claims?.sub ?? null),
+      this.swiggy.getValidAccessTokenWithFallback(claims?.sub ?? null),
+    ]);
+
+    const [zeptoResults, swiggyResults] = await Promise.all([
+      zeptoSession
+        ? this.cached(`zepto-live-search:${zeptoSession.ownerUserId}:${q.toLowerCase()}:${requestedLimit}`, () => searchRealZepto(zeptoSession.accessToken, q, requestedLimit))
+        : Promise.resolve<SourceProduct[]>([]),
+      swiggySession ? cachedSearchRealSwiggy(this.aggregation.cache, swiggySession, q, requestedLimit) : Promise.resolve<SourceProduct[]>([]),
+    ]);
+
+    const products: SourceProduct[] = [...zeptoResults, ...swiggyResults];
+    const sourcesQueried = (zeptoSession ? 1 : 0) + (swiggySession ? 1 : 0);
 
     return this.transform.buildSearchResponse(q, products, sourcesQueried, weightsForMode(mode));
   }
 
-  private async getValidZeptoSession(authHeader?: string): Promise<{ userId: string; accessToken: string } | null> {
+  private async claimsFrom(authHeader?: string): Promise<JwtClaims | null> {
     const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-    const claims = token ? await this.jwt.verify<JwtClaims>(token).catch(() => null) : null;
-    // Falls back to the shared owner's connection when this visitor has none of their own —
-    // see ZeptoOAuthConfig.defaultOwnerUserId.
-    const session = await this.zepto.getValidAccessTokenWithFallback(claims?.sub ?? null);
-    return session ? { userId: session.ownerUserId, accessToken: session.accessToken } : null;
+    return token ? this.jwt.verify<JwtClaims>(token).catch(() => null) : null;
   }
 
   /**
-   * A real Zepto search is a multi-round-trip session against an external server (initialize,
-   * pick a store, search) — real, unavoidable network latency. What *is* avoidable is paying
-   * that cost on every request: the home page alone re-runs the exact same `limit=8` empty-query
-   * search on every load. Cached per-user (results are personal to the connected account) for
-   * 30s, using the same cache instance/backing store `AggregationGateway` already owns.
+   * A real search is a multi-round-trip session against an external server (initialize, pick
+   * a store, search) — real, unavoidable network latency. What *is* avoidable is paying that
+   * cost on every request: the home page alone re-runs the exact same `limit=8` empty-query
+   * search on every load. Cached for 30s using the same cache instance/backing store
+   * `AggregationGateway` already owns.
    */
-  private async cachedSearchRealZepto(zepto: { userId: string; accessToken: string }, query: string, limit: number): Promise<SourceProduct[]> {
-    const cacheKey = `zepto-live-search:${zepto.userId}:${query.toLowerCase()}:${limit}`;
+  private async cached(cacheKey: string, fetchFn: () => Promise<SourceProduct[]>): Promise<SourceProduct[]> {
     const cached = await this.aggregation.cache.get<SourceProduct[]>(cacheKey);
     if (cached) return cached;
-    const results = await searchRealZepto(zepto.accessToken, query, limit);
+    const results = await fetchFn();
     await this.aggregation.cache.set(cacheKey, results, 30);
     return results;
   }

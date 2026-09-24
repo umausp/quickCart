@@ -107,12 +107,20 @@ export class CartService {
    * shared fallback owner's (`ZeptoOAuthConfig.defaultOwnerUserId`) if they have none — never
    * the mock retailer, which has never heard of a real Zepto `productVariantId` and would 404
    * on it (which is exactly what was happening before this existed).
+   *
+   * "swiggy" is search-only for now: real Instamart search results exist, but there's no
+   * confirmed single-product refetch tool in Swiggy's real tool set to build a
+   * server-authoritative add-to-cart on top of yet (its builder docs list no `get_product`
+   * equivalent, unlike Zepto's `get_product_details`) — returns `unknown_product` rather than
+   * falling through to `aggregation.getSourceProduct`, which would throw (no mock swiggy
+   * retailer exists to fall back to either).
    */
   private async fetchSourceProduct(userId: string, req: AddToCartRequest): Promise<SourceProduct | null> {
     if (req.sourceId === "zepto") {
       const zeptoSession = await this.zepto.getValidAccessTokenWithFallback(userId);
       if (zeptoSession) return getCachedRealZeptoProduct(this.aggregation.cache, zeptoSession.accessToken, req.sourceProductId);
     }
+    if (req.sourceId === "swiggy") return null;
     return this.aggregation.getSourceProduct(req.sourceId, req.sourceProductId);
   }
 

@@ -6,6 +6,7 @@ import {
   KvAddressRepository,
   KvAuthStateRepository,
   KvCartRepository,
+  KvOAuthConnectionRepository,
   KvOrderRepository,
   KvUserRepository,
   KvZeptoConnectionRepository,
@@ -33,6 +34,9 @@ import { OrdersService } from "./orders/orders.service.js";
 import { loadZeptoConfig } from "./zepto/zepto.config.js";
 import { ZeptoOAuthService } from "./zepto/zepto-oauth.service.js";
 import { getCachedRealZeptoProduct, parseZeptoLiveCanonicalSku, searchRealZepto } from "./zepto/zepto-mcp-adapter.js";
+import { loadSwiggyConfig } from "./swiggy/swiggy.config.js";
+import { SwiggyOAuthService } from "./swiggy/swiggy-oauth.service.js";
+import { cachedSearchRealSwiggy, parseSwiggyLiveCanonicalSku } from "./swiggy/swiggy-mcp-adapter.js";
 
 /**
  * The Cloudflare Workers entrypoint for the whole backend — same layered architecture
@@ -74,10 +78,21 @@ export interface Env {
   ZEPTO_OAUTH_TOKEN_URL?: string;
   ZEPTO_OAUTH_MCP_URL?: string;
   ZEPTO_OAUTH_SCOPE?: string;
+  ZEPTO_DEFAULT_OWNER_USER_ID?: string;
+  // Real Swiggy OAuth — see apps/api/src/swiggy/. Same reasoning as the Zepto vars above.
+  SWIGGY_OAUTH_CLIENT_ID?: string;
+  SWIGGY_OAUTH_REDIRECT_URI?: string;
+  SWIGGY_OAUTH_AUTHORIZE_URL?: string;
+  SWIGGY_OAUTH_TOKEN_URL?: string;
+  SWIGGY_OAUTH_MCP_URL?: string;
+  SWIGGY_OAUTH_SCOPE?: string;
+  SWIGGY_DEFAULT_OWNER_USER_ID?: string;
 }
 
 const DEFAULT_LOCATION = { pincode: "560001" };
-const DEFAULT_URLS: Record<SourceId, string> = {
+// "swiggy" has no entry — it only ever resolves through a real, per-user OAuth connection
+// (see McpSourceClientFactory's constructor doc comment), never a shared mock retailer Worker.
+const DEFAULT_URLS: Partial<Record<SourceId, string>> = {
   blinkit: "https://quickcart-mcp-blinkit.pathakumashankar.workers.dev/mcp",
   zepto: "https://quickcart-mcp-zepto.pathakumashankar.workers.dev/mcp",
   bigbasket: "https://quickcart-mcp-bigbasket.pathakumashankar.workers.dev/mcp",
@@ -110,6 +125,7 @@ interface Services {
   orders: OrdersService;
   jwt: ReturnType<typeof createJoseJwtPort>;
   zepto: ZeptoOAuthService;
+  swiggy: SwiggyOAuthService;
 }
 
 // Module-scope cache: Workers *may* reuse the same isolate across several requests, saving
@@ -128,7 +144,7 @@ function buildServices(env: Env): Services {
   if (cachedServices) return cachedServices;
 
   const kv = env.API_KV as unknown as DomainKv;
-  const urls: Record<SourceId, string> = {
+  const urls: Partial<Record<SourceId, string>> = {
     blinkit: env.BLINKIT_MCP_URL ?? DEFAULT_URLS.blinkit,
     zepto: env.ZEPTO_MCP_URL ?? DEFAULT_URLS.zepto,
     bigbasket: env.BIGBASKET_MCP_URL ?? DEFAULT_URLS.bigbasket,
@@ -162,11 +178,15 @@ function buildServices(env: Env): Services {
   const zeptoConnections = new KvZeptoConnectionRepository(kv);
   const zepto = new ZeptoOAuthService(zeptoConnections, users, auth, zeptoConfig);
 
+  const swiggyConfig = loadSwiggyConfig(env as unknown as Record<string, string | undefined>);
+  const swiggyConnections = new KvOAuthConnectionRepository(kv, "swiggy");
+  const swiggy = new SwiggyOAuthService(swiggyConnections, users, auth, swiggyConfig);
+
   const cart = new CartService(cartRepo, aggregation, addresses, zepto);
   const orchestrator = new OrderOrchestrator(aggregation);
   const orders = new OrdersService(orderRepo, cart, addresses, orchestrator);
 
-  cachedServices = { aggregation, auth, addresses, cart, orders, jwt, zepto };
+  cachedServices = { aggregation, auth, addresses, cart, orders, jwt, zepto, swiggy };
   return cachedServices;
 }
 
@@ -197,27 +217,33 @@ async function requireAuth(c: import("hono").Context<AppEnv>, next: () => Promis
 
 // ---- Gateway: search & product detail (public) --------------------------------------------
 
-// No mock data: this only ever returns real MCP results. A logged-in shopper's real,
-// connected Zepto account is the only source right now (Zepto's own server requires auth for
-// every call, including plain search); a guest, or anyone not connected, gets an empty result
-// set rather than the old shared demo catalogue. Swiggy joins this list once QuickCart has
-// real API access to it (blocked on Swiggy's own invite-based application, not this code).
+// No mock data: this only ever returns real MCP results, fanned out to every real provider
+// concurrently — the actual point of this project (comparing real prices across more than
+// one real MCP source in one place). A shopper's own connected account is used first per
+// provider; a visitor with none of their own falls back to that provider's shared owner
+// connection (an explicit, informed choice by each account's owner). A provider with no
+// fallback configured and no personal connection simply contributes nothing.
 app.get("/v1/search", async (c) => {
-  const { aggregation, jwt, zepto } = buildServices(c.env);
+  const { aggregation, jwt, zepto, swiggy } = buildServices(c.env);
   const q = c.req.query("q") ?? "";
   const limit = Number(c.req.query("limit")) || 20;
 
   const header = c.req.header("authorization") ?? "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : null;
   const claims = token ? await jwt.verify<JwtClaims>(token).catch(() => null) : null;
-  // Falls back to the shared owner's connection when this visitor (or a request with no
-  // session at all) has none of their own — see ZeptoOAuthConfig.defaultOwnerUserId.
-  const zeptoSession = await zepto.getValidAccessTokenWithFallback(claims?.sub ?? null);
 
-  const products: SourceProduct[] = zeptoSession
-    ? await cachedSearchRealZepto(aggregation, { userId: zeptoSession.ownerUserId, accessToken: zeptoSession.accessToken }, q, limit)
-    : [];
-  const sourcesQueried = zeptoSession ? 1 : 0;
+  const [zeptoSession, swiggySession] = await Promise.all([
+    zepto.getValidAccessTokenWithFallback(claims?.sub ?? null),
+    swiggy.getValidAccessTokenWithFallback(claims?.sub ?? null),
+  ]);
+
+  const [zeptoResults, swiggyResults] = await Promise.all([
+    zeptoSession ? cachedSearchRealZepto(aggregation, { userId: zeptoSession.ownerUserId, accessToken: zeptoSession.accessToken }, q, limit) : Promise.resolve<SourceProduct[]>([]),
+    swiggySession ? cachedSearchRealSwiggy(aggregation.cache, swiggySession, q, limit) : Promise.resolve<SourceProduct[]>([]),
+  ]);
+
+  const products: SourceProduct[] = [...zeptoResults, ...swiggyResults];
+  const sourcesQueried = (zeptoSession ? 1 : 0) + (swiggySession ? 1 : 0);
 
   return c.json(buildSearchResponse(q, products, sourcesQueried, weightsForMode(c.req.query("mode"))));
 });
@@ -244,6 +270,9 @@ app.get("/v1/products/:sku/offers", async (c) => {
     const meta = { canonicalSku: product.canonicalSku, title: product.title, brand: product.brand, category: product.category, packSize: product.packSize, image: product.image };
     return c.json(buildProductOffersResponse(meta, [product], 1, 1, weightsForMode(mode)));
   }
+  // Swiggy is search-only for now — same reason as CartService.fetchSourceProduct: no
+  // confirmed single-product refetch tool in its real tool set yet to build this on top of.
+  if (parseSwiggyLiveCanonicalSku(sku)) return c.json({ error: "unknown_sku", sku }, 404);
 
   const pincode = DEFAULT_LOCATION.pincode;
   let meta = aggregation.getCanonicalMeta(sku);
@@ -322,6 +351,41 @@ app.get("/v1/connections/zepto/status", requireAuth, async (c) => {
 app.delete("/v1/connections/zepto", requireAuth, async (c) => {
   const { zepto } = buildServices(c.env);
   await zepto.disconnect(c.get("user").sub);
+  return c.json({ disconnected: true });
+});
+
+// ---- Real Swiggy connection — same shape as Zepto's above, but `start`/`complete` need no
+// manual paste-back: Swiggy's real DCR accepted our own hosted domain as a redirect_uri, so
+// the callback lands directly on SwiggyOAuthConfig.redirectUri with ?code&state. -------------
+
+app.post("/v1/connections/swiggy/start", async (c) => {
+  const { swiggy, jwt } = buildServices(c.env);
+  const header = c.req.header("authorization") ?? "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : null;
+  const userId = token
+    ? await jwt
+        .verify<JwtClaims>(token)
+        .then((claims) => claims.sub)
+        .catch(() => null)
+    : null;
+  return c.json(await swiggy.beginConnect(userId));
+});
+
+app.post("/v1/connections/swiggy/complete", async (c) => {
+  const { swiggy } = buildServices(c.env);
+  const body = await c.req.json<{ code?: string; state?: string }>();
+  if (!body.code || !body.state) return c.json({ error: "missing_code_or_state" }, 400);
+  return c.json(await swiggy.completeConnect(body.code, body.state));
+});
+
+app.get("/v1/connections/swiggy/status", requireAuth, async (c) => {
+  const { swiggy } = buildServices(c.env);
+  return c.json(await swiggy.getStatus(c.get("user").sub));
+});
+
+app.delete("/v1/connections/swiggy", requireAuth, async (c) => {
+  const { swiggy } = buildServices(c.env);
+  await swiggy.disconnect(c.get("user").sub);
   return c.json({ disconnected: true });
 });
 

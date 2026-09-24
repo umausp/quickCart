@@ -1,15 +1,15 @@
 import { BadRequestException, Inject, Injectable } from "@nestjs/common";
-import type { UserRepositoryPort, ZeptoConnection, ZeptoConnectionPort } from "@quickcart/domain";
+import type { OAuthConnection, OAuthConnectionPort, UserRepositoryPort } from "@quickcart/domain";
 import type { AuthTokens, User } from "@quickcart/contracts";
 import { USER_REPOSITORY } from "../auth/auth.tokens.js";
 import { AuthService } from "../auth/auth.service.js";
-import type { ZeptoOAuthConfig } from "./zepto.config.js";
-import { ZEPTO_CONFIG, ZEPTO_CONNECTION } from "./zepto.tokens.js";
 import { codeChallengeFor, decodeJwtSubject, randomCodeVerifier, randomState } from "../oauth/pkce.js";
+import type { SwiggyOAuthConfig } from "./swiggy.config.js";
+import { SWIGGY_CONFIG, SWIGGY_CONNECTION } from "./swiggy.tokens.js";
 
 const STATE_TTL_SECONDS = 600;
 
-interface ZeptoTokenResponse {
+interface SwiggyTokenResponse {
   access_token: string;
   refresh_token?: string;
   expires_in?: number;
@@ -17,19 +17,20 @@ interface ZeptoTokenResponse {
 }
 
 /**
- * Drives the real OAuth 2.1 + PKCE handshake against `auth.zepto.co.in` and stores the
- * resulting connection. "Continue with Zepto" doubles as a QuickCart login method: if
- * `beginConnect` wasn't given an existing QuickCart user, `completeConnect` finds-or-creates
- * one and mints a normal QuickCart session the same way OTP verification does — see
- * `AuthService.issueTokens`.
+ * Drives the real OAuth 2.1 + PKCE handshake against `mcp.swiggy.com/auth` — genuinely
+ * simpler than Zepto's equivalent (`ZeptoOAuthService`) because Swiggy's Dynamic Client
+ * Registration accepted our own real hosted domain as a redirect_uri (confirmed live), so
+ * there's no manual paste-back step: the browser lands straight back on
+ * `SwiggyOAuthConfig.redirectUri` with `?code&state` in the query string. Same "doubles as a
+ * QuickCart login" behaviour as Zepto — see `completeConnect`.
  */
 @Injectable()
-export class ZeptoOAuthService {
+export class SwiggyOAuthService {
   constructor(
-    @Inject(ZEPTO_CONNECTION) private readonly connections: ZeptoConnectionPort,
+    @Inject(SWIGGY_CONNECTION) private readonly connections: OAuthConnectionPort,
     @Inject(USER_REPOSITORY) private readonly users: UserRepositoryPort,
     private readonly auth: AuthService,
-    @Inject(ZEPTO_CONFIG) private readonly config: ZeptoOAuthConfig,
+    @Inject(SWIGGY_CONFIG) private readonly config: SwiggyOAuthConfig,
   ) {}
 
   async beginConnect(existingUserId: string | null): Promise<{ authorizeUrl: string }> {
@@ -46,10 +47,10 @@ export class ZeptoOAuthService {
     url.searchParams.set("code_challenge_method", "S256");
     url.searchParams.set("state", state);
     url.searchParams.set("scope", this.config.scope);
-    // RFC 8707 Resource Indicator — without this, Zepto issues a token whose `aud` claim is
-    // just our own client_id, and `mcp.zepto.co.in` rejects it outright with "token is not
-    // intended for this resource" (confirmed against the real server). Must be sent on both
-    // this request and the token exchange below for the audience to end up right.
+    // RFC 8707 Resource Indicator — Zepto's server issues a token with the wrong `aud` claim
+    // without this (confirmed live, see CLOUDFLARE-MIGRATION-PLAN.md); sending it here too on
+    // the assumption Swiggy's real server has the same requirement rather than finding out the
+    // same way twice.
     url.searchParams.set("resource", this.config.mcpUrl);
     return { authorizeUrl: url.toString() };
   }
@@ -67,7 +68,7 @@ export class ZeptoOAuthService {
       resource: this.config.mcpUrl,
     });
 
-    const user = pending.userId ? await this.mustFindUser(pending.userId) : await this.findOrCreateUserForZepto(token.access_token);
+    const user = pending.userId ? await this.mustFindUser(pending.userId) : await this.findOrCreateUserForSwiggy(token.access_token);
 
     await this.connections.saveConnection(user.id, {
       accessToken: token.access_token,
@@ -79,14 +80,6 @@ export class ZeptoOAuthService {
     return this.auth.issueTokens(user);
   }
 
-  /**
-   * `connected` is strictly "does *this* user have their own connection" (drives the
-   * Profile page's connect/disconnect button). `hasRealData` is broader — true if real Zepto
-   * data is available to them *at all*, including via the shared fallback owner's connection
-   * — that's what home/search should actually key their "connect to see real data" messaging
-   * off of, since a visitor using the fallback already sees real results without connecting
-   * anything themselves.
-   */
   async getStatus(userId: string): Promise<{ connected: boolean; connectedAt?: string; hasRealData: boolean }> {
     const connection = await this.connections.getConnection(userId);
     if (connection) return { connected: true, connectedAt: connection.connectedAt, hasRealData: true };
@@ -99,10 +92,6 @@ export class ZeptoOAuthService {
     await this.connections.deleteConnection(userId);
   }
 
-  /** Returns a live access token for this user's real Zepto account, refreshing it first if
-   * it's expired (or about to). Returns `null` if there's no connection, or the refresh
-   * itself fails (in which case the stale connection is dropped so the UI can prompt a
-   * reconnect instead of silently failing every real MCP call). */
   async getValidAccessToken(userId: string): Promise<string | null> {
     const connection = await this.connections.getConnection(userId);
     if (!connection) return null;
@@ -112,7 +101,7 @@ export class ZeptoOAuthService {
       return null;
     }
 
-    let token: ZeptoTokenResponse;
+    let token: SwiggyTokenResponse;
     try {
       token = await this.exchangeToken({
         grant_type: "refresh_token",
@@ -125,7 +114,7 @@ export class ZeptoOAuthService {
       return null;
     }
 
-    const refreshed: ZeptoConnection = {
+    const refreshed: OAuthConnection = {
       accessToken: token.access_token,
       refreshToken: token.refresh_token ?? connection.refreshToken,
       expiresAt: Date.now() + (token.expires_in ?? 3600) * 1000,
@@ -135,18 +124,9 @@ export class ZeptoOAuthService {
     return refreshed.accessToken;
   }
 
-  /**
-   * Same as `getValidAccessToken`, but falls back to the configured shared owner's connection
-   * (`ZeptoOAuthConfig.defaultOwnerUserId`) when `userId` has none of their own — this is what
-   * lets a visitor browse real data without connecting anything, at the explicit, informed
-   * request of whoever owns that fallback connection. `userId` is tried first so the owner's
-   * own browsing is unaffected either way, and so anyone who *does* connect their own account
-   * always sees their own data, never someone else's.
-   *
-   * Returns which userId's connection actually got used, not just the token: callers cache
-   * real-Zepto lookups per connection owner, and every anonymous visitor resolving to the same
-   * shared fallback should share one cache entry, not fragment into one per visitor.
-   */
+  /** Same fallback rule as `ZeptoOAuthService.getValidAccessTokenWithFallback` — see its doc
+   * comment. Returns which userId's connection actually got used so callers can cache
+   * real-Swiggy lookups per connection owner, not per requester. */
   async getValidAccessTokenWithFallback(userId: string | null): Promise<{ ownerUserId: string; accessToken: string } | null> {
     if (userId) {
       const own = await this.getValidAccessToken(userId);
@@ -162,26 +142,24 @@ export class ZeptoOAuthService {
     return this.config.mcpUrl;
   }
 
-  private async exchangeToken(params: Record<string, string>): Promise<ZeptoTokenResponse> {
+  private async exchangeToken(params: Record<string, string>): Promise<SwiggyTokenResponse> {
     const res = await fetch(this.config.tokenUrl, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams(params),
     });
     if (!res.ok) {
-      throw new BadRequestException({ error: "zepto_token_exchange_failed", status: res.status, body: await res.text() });
+      throw new BadRequestException({ error: "swiggy_token_exchange_failed", status: res.status, body: await res.text() });
     }
-    return (await res.json()) as ZeptoTokenResponse;
+    return (await res.json()) as SwiggyTokenResponse;
   }
 
-  private async findOrCreateUserForZepto(accessToken: string): Promise<User> {
+  private async findOrCreateUserForSwiggy(accessToken: string): Promise<User> {
     const subject = decodeJwtSubject(accessToken);
-    // `phone` doubles as the Zepto-account linking key here — there's no real phone number at
-    // this layer, and reusing the existing `findByPhone` lookup avoids a second identity index.
-    const phone = subject ? `zepto:${subject}` : `zepto:${crypto.randomUUID()}`;
+    const phone = subject ? `swiggy:${subject}` : `swiggy:${crypto.randomUUID()}`;
     const existing = await this.users.findByPhone(phone);
     if (existing) return existing;
-    return this.users.create({ phone, name: "Zepto shopper", defaultPincode: "560001" });
+    return this.users.create({ phone, name: "Swiggy shopper", defaultPincode: "560001" });
   }
 
   private async mustFindUser(userId: string): Promise<User> {

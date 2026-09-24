@@ -1,8 +1,10 @@
 "use client";
 
 import Box from "@mui/material/Box";
+import Divider from "@mui/material/Divider";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
+import { SwiggyConnectButton } from "../swiggy-connect-button";
 import { ZeptoConnectFlow } from "../zepto-connect-flow";
 
 /** Phone/OTP login still exists (`actions/auth.ts`, `AuthService.requestOtp`/`verifyOtp`) but
@@ -23,6 +25,10 @@ export function LoginForm() {
         </Stack>
 
         <ZeptoConnectFlow />
+
+        <Divider sx={{ my: 2 }}>or</Divider>
+
+        <SwiggyConnectButton />
       </Box>
     </Box>
   );

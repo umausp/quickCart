@@ -4,8 +4,8 @@ import Grid from "@mui/material/Grid";
 import Typography from "@mui/material/Typography";
 import type { SearchResponse } from "@quickcart/contracts";
 import { EmptyState } from "@quickcart/ui";
-import { apiOptionalAuth } from "../../../../lib/api";
-import { LinkChip } from "../../link-components";
+import { apiOptionalAuth, isZeptoConnected } from "../../../../lib/api";
+import { LinkButton, LinkChip } from "../../link-components";
 import { ResultCard } from "../../result-card";
 import { SearchBox } from "../search-box";
 
@@ -19,7 +19,10 @@ const MODES = [
 
 export default async function SearchResultsPage({ searchParams }: { searchParams: Promise<{ q?: string; mode?: string }> }) {
   const { q = "", mode = "balanced" } = await searchParams;
-  const response = await apiOptionalAuth<SearchResponse>(`/search?q=${encodeURIComponent(q)}&mode=${mode}&limit=20`);
+  const [response, connected] = await Promise.all([
+    apiOptionalAuth<SearchResponse>(`/search?q=${encodeURIComponent(q)}&mode=${mode}&limit=20`),
+    isZeptoConnected(),
+  ]);
 
   return (
     <Container maxWidth="lg" sx={{ py: 3 }}>
@@ -39,11 +42,24 @@ export default async function SearchResultsPage({ searchParams }: { searchParams
         </Stack>
 
         <Typography variant="caption" color="text.secondary">
-          {response.results.length} result{response.results.length === 1 ? "" : "s"} · comparing 5 sources
+          {response.results.length} result{response.results.length === 1 ? "" : "s"} · {connected ? "live from your connected Zepto account" : "not connected"}
         </Typography>
 
         {response.results.length === 0 ? (
-          <EmptyState icon="🔍" title="No results" subtitle={`Nothing matched "${q}" across our 5 sources.`} />
+          connected ? (
+            <EmptyState icon="🔍" title="No results" subtitle={`Nothing matched "${q}" on Zepto right now.`} />
+          ) : (
+            <EmptyState
+              icon="🔗"
+              title="Connect Zepto to search"
+              subtitle="QuickCart only shows real data — connect your account to start browsing."
+              action={
+                <LinkButton href="/profile" variant="contained">
+                  Connect Zepto
+                </LinkButton>
+              }
+            />
+          )
         ) : (
           <Grid container spacing={2}>
             {response.results.map((card) => (

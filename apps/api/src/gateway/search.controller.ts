@@ -1,6 +1,6 @@
 import { Controller, Get, Headers, Inject, Query } from "@nestjs/common";
 import type { AggregationGateway } from "@quickcart/aggregation-core";
-import { SOURCE_IDS, type JwtClaims, type SearchResponse, type SourceId, type SourceProduct } from "@quickcart/contracts";
+import type { JwtClaims, SearchResponse, SourceProduct } from "@quickcart/contracts";
 import { AGGREGATION_GATEWAY } from "../aggregation/aggregation.tokens.js";
 import { JWT_PORT } from "../auth/auth.tokens.js";
 import type { JwtPort } from "../auth/jwt-port.js";
@@ -9,14 +9,14 @@ import { ZeptoOAuthService } from "../zepto/zepto-oauth.service.js";
 import { searchRealZepto } from "../zepto/zepto-mcp-adapter.js";
 import { weightsForMode } from "./ranking-mode.js";
 
-const DEFAULT_PINCODE = "560001";
-const NON_ZEPTO_SOURCES: SourceId[] = SOURCE_IDS.filter((s) => s !== "zepto");
-
 /**
- * `GET /v1/search` — the List/Search-results screen's one endpoint. Composes Aggregation
- * (fetch) with Transform (rank + shape); this controller itself does neither. Auth-optional:
- * a logged-in shopper with a connected real Zepto account gets that account's live results
- * merged in in place of the shared demo "zepto" source; everyone else is unaffected.
+ * `GET /v1/search` — the List/Search-results screen's one endpoint. No mock data: this only
+ * ever returns real MCP results. Today that means a logged-in shopper's real, connected Zepto
+ * account (Zepto's own server requires auth for every call, including plain search — confirmed
+ * directly against it, not a QuickCart choice); a guest, or anyone not connected, gets an
+ * empty result set rather than the old shared demo catalogue. Swiggy will join this list the
+ * moment QuickCart has real API access to it (currently blocked on Swiggy's own invite-based
+ * application process, not anything this code controls).
  */
 @Controller()
 export class SearchController {
@@ -30,42 +30,44 @@ export class SearchController {
   @Get("search")
   async search(
     @Query("q") q = "",
-    @Query("pincode") pincode = DEFAULT_PINCODE,
     @Query("mode") mode?: string,
     @Query("limit") limit?: string,
     @Headers("authorization") authHeader?: string,
   ): Promise<SearchResponse> {
-    const location = { pincode };
     const requestedLimit = Number(limit) || 20;
-    const zeptoToken = await this.getValidZeptoToken(authHeader);
+    const zepto = await this.getValidZeptoSession(authHeader);
 
-    const { results, sourcesQueried } = await this.aggregation.search(
-      q,
-      location,
-      requestedLimit,
-      zeptoToken ? { sources: NON_ZEPTO_SOURCES } : undefined,
-    );
-    const products: SourceProduct[] = results.flatMap((r) => r.value ?? []);
+    const products: SourceProduct[] = zepto ? await this.cachedSearchRealZepto(zepto, q, requestedLimit) : [];
+    const sourcesQueried = zepto ? 1 : 0;
 
-    let finalProducts = products;
-    let finalSourcesQueried = sourcesQueried;
-    if (zeptoToken) {
-      const real = await searchRealZepto(zeptoToken, q, requestedLimit);
-      finalProducts = [...products, ...real];
-      finalSourcesQueried += 1;
-    }
-
-    return this.transform.buildSearchResponse(q, finalProducts, finalSourcesQueried, weightsForMode(mode));
+    return this.transform.buildSearchResponse(q, products, sourcesQueried, weightsForMode(mode));
   }
 
-  private async getValidZeptoToken(authHeader?: string): Promise<string | null> {
+  private async getValidZeptoSession(authHeader?: string): Promise<{ userId: string; accessToken: string } | null> {
     const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
     if (!token) return null;
     try {
       const claims = await this.jwt.verify<JwtClaims>(token);
-      return this.zepto.getValidAccessToken(claims.sub);
+      const accessToken = await this.zepto.getValidAccessToken(claims.sub);
+      return accessToken ? { userId: claims.sub, accessToken } : null;
     } catch {
       return null;
     }
+  }
+
+  /**
+   * A real Zepto search is a multi-round-trip session against an external server (initialize,
+   * pick a store, search) — real, unavoidable network latency. What *is* avoidable is paying
+   * that cost on every request: the home page alone re-runs the exact same `limit=8` empty-query
+   * search on every load. Cached per-user (results are personal to the connected account) for
+   * 30s, using the same cache instance/backing store `AggregationGateway` already owns.
+   */
+  private async cachedSearchRealZepto(zepto: { userId: string; accessToken: string }, query: string, limit: number): Promise<SourceProduct[]> {
+    const cacheKey = `zepto-live-search:${zepto.userId}:${query.toLowerCase()}:${limit}`;
+    const cached = await this.aggregation.cache.get<SourceProduct[]>(cacheKey);
+    if (cached) return cached;
+    const results = await searchRealZepto(zepto.accessToken, query, limit);
+    await this.aggregation.cache.set(cacheKey, results, 30);
+    return results;
   }
 }

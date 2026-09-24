@@ -15,7 +15,6 @@ import {
   AddToCartRequestSchema,
   PlaceOrderRequestSchema,
   RequestOtpSchema,
-  SOURCE_IDS,
   UpsertAddressSchema,
   VerifyOtpSchema,
   type JwtClaims,
@@ -33,7 +32,7 @@ import { OrderOrchestrator } from "./orders/orchestrator.js";
 import { OrdersService } from "./orders/orders.service.js";
 import { loadZeptoConfig } from "./zepto/zepto.config.js";
 import { ZeptoOAuthService } from "./zepto/zepto-oauth.service.js";
-import { searchRealZepto } from "./zepto/zepto-mcp-adapter.js";
+import { getRealZeptoProduct, parseZeptoLiveCanonicalSku, searchRealZepto } from "./zepto/zepto-mcp-adapter.js";
 
 /**
  * The Cloudflare Workers entrypoint for the whole backend — same layered architecture
@@ -85,7 +84,23 @@ const DEFAULT_URLS: Record<SourceId, string> = {
   flipkart: "https://quickcart-mcp-flipkart.pathakumashankar.workers.dev/mcp",
   amazon: "https://quickcart-mcp-amazon.pathakumashankar.workers.dev/mcp",
 };
-const NON_ZEPTO_SOURCES: SourceId[] = SOURCE_IDS.filter((s) => s !== "zepto");
+/** Same reasoning as the Node deployment's identical helper in `search.controller.ts`: a real
+ * Zepto search is a multi-round-trip session against an external server, and the home page
+ * alone re-runs the same query on every load — cache it per-user for the same 30s window the
+ * shared mock fan-out already uses, via the same cache instance. */
+async function cachedSearchRealZepto(
+  aggregation: AggregationGateway,
+  zepto: { userId: string; accessToken: string },
+  query: string,
+  limit: number,
+): Promise<SourceProduct[]> {
+  const cacheKey = `zepto-live-search:${zepto.userId}:${query.toLowerCase()}:${limit}`;
+  const cached = await aggregation.cache.get<SourceProduct[]>(cacheKey);
+  if (cached) return cached;
+  const results = await searchRealZepto(zepto.accessToken, query, limit);
+  await aggregation.cache.set(cacheKey, results, 30);
+  return results;
+}
 
 interface Services {
   aggregation: AggregationGateway;
@@ -142,13 +157,14 @@ function buildServices(env: Env): Services {
 
   const auth = new AuthService(users, jwt, authState);
   const addresses = new AddressesService(addressRepo);
-  const cart = new CartService(cartRepo, aggregation, addresses);
-  const orchestrator = new OrderOrchestrator(aggregation);
-  const orders = new OrdersService(orderRepo, cart, addresses, orchestrator);
 
   const zeptoConfig = loadZeptoConfig(env as unknown as Record<string, string | undefined>);
   const zeptoConnections = new KvZeptoConnectionRepository(kv);
   const zepto = new ZeptoOAuthService(zeptoConnections, users, auth, zeptoConfig);
+
+  const cart = new CartService(cartRepo, aggregation, addresses, zepto);
+  const orchestrator = new OrderOrchestrator(aggregation);
+  const orders = new OrdersService(orderRepo, cart, addresses, orchestrator);
 
   cachedServices = { aggregation, auth, addresses, cart, orders, jwt, zepto };
   return cachedServices;
@@ -181,39 +197,62 @@ async function requireAuth(c: import("hono").Context<AppEnv>, next: () => Promis
 
 // ---- Gateway: search & product detail (public) --------------------------------------------
 
+// No mock data: this only ever returns real MCP results. A logged-in shopper's real,
+// connected Zepto account is the only source right now (Zepto's own server requires auth for
+// every call, including plain search); a guest, or anyone not connected, gets an empty result
+// set rather than the old shared demo catalogue. Swiggy joins this list once QuickCart has
+// real API access to it (blocked on Swiggy's own invite-based application, not this code).
 app.get("/v1/search", async (c) => {
   const { aggregation, jwt, zepto } = buildServices(c.env);
   const q = c.req.query("q") ?? "";
-  const pincode = c.req.query("pincode") ?? DEFAULT_LOCATION.pincode;
   const limit = Number(c.req.query("limit")) || 20;
 
   const header = c.req.header("authorization") ?? "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : null;
-  const zeptoToken = token
+  const zeptoSession = token
     ? await jwt
         .verify<JwtClaims>(token)
-        .then((claims) => zepto.getValidAccessToken(claims.sub))
+        .then(async (claims) => {
+          const accessToken = await zepto.getValidAccessToken(claims.sub);
+          return accessToken ? { userId: claims.sub, accessToken } : null;
+        })
         .catch(() => null)
     : null;
 
-  const { results, sourcesQueried } = await aggregation.search(q, { pincode }, limit, zeptoToken ? { sources: NON_ZEPTO_SOURCES } : undefined);
-  const products: SourceProduct[] = results.flatMap((r) => r.value ?? []);
+  const products: SourceProduct[] = zeptoSession ? await cachedSearchRealZepto(aggregation, zeptoSession, q, limit) : [];
+  const sourcesQueried = zeptoSession ? 1 : 0;
 
-  let finalProducts = products;
-  let finalSourcesQueried = sourcesQueried;
-  if (zeptoToken) {
-    const real = await searchRealZepto(zeptoToken, q, limit);
-    finalProducts = [...products, ...real];
-    finalSourcesQueried += 1;
-  }
-
-  return c.json(buildSearchResponse(q, finalProducts, finalSourcesQueried, weightsForMode(c.req.query("mode"))));
+  return c.json(buildSearchResponse(q, products, sourcesQueried, weightsForMode(c.req.query("mode"))));
 });
 
+// No mock data: a `ZEPTO-LIVE-*` sku (the only kind `/v1/search` can produce now) is refetched
+// live from the connected shopper's real Zepto account. There's nothing to compare it against
+// yet (one real source), so this is a single-offer response, not a ranked multi-source one.
 app.get("/v1/products/:sku/offers", async (c) => {
-  const { aggregation } = buildServices(c.env);
+  const { aggregation, jwt, zepto } = buildServices(c.env);
   const sku = c.req.param("sku");
-  const pincode = c.req.query("pincode") ?? DEFAULT_LOCATION.pincode;
+  const mode = c.req.query("mode");
+
+  const productVariantId = parseZeptoLiveCanonicalSku(sku);
+  if (productVariantId) {
+    const header = c.req.header("authorization") ?? "";
+    const token = header.startsWith("Bearer ") ? header.slice(7) : null;
+    const accessToken = token
+      ? await jwt
+          .verify<JwtClaims>(token)
+          .then((claims) => zepto.getValidAccessToken(claims.sub))
+          .catch(() => null)
+      : null;
+    if (!accessToken) return c.json({ error: "unknown_sku", sku }, 404);
+
+    const product = await getRealZeptoProduct(accessToken, productVariantId);
+    if (!product) return c.json({ error: "unknown_sku", sku }, 404);
+
+    const meta = { canonicalSku: product.canonicalSku, title: product.title, brand: product.brand, category: product.category, packSize: product.packSize, image: product.image };
+    return c.json(buildProductOffersResponse(meta, [product], 1, 1, weightsForMode(mode)));
+  }
+
+  const pincode = DEFAULT_LOCATION.pincode;
   let meta = aggregation.getCanonicalMeta(sku);
   // The Node deployment warms the catalogue once at process startup and stays warm forever
   // (a long-lived process); a Worker isolate has no such guarantee — it may be freshly spun
@@ -229,7 +268,7 @@ app.get("/v1/products/:sku/offers", async (c) => {
 
   const { results, sourcesQueried, sourcesReturned } = await aggregation.getOffersForSku(sku, { pincode });
   const products = results.map((r) => r.value).filter((v): v is SourceProduct => Boolean(v));
-  return c.json(buildProductOffersResponse(meta, products, sourcesQueried, sourcesReturned, weightsForMode(c.req.query("mode"))));
+  return c.json(buildProductOffersResponse(meta, products, sourcesQueried, sourcesReturned, weightsForMode(mode)));
 });
 
 // ---- Auth (public) --------------------------------------------------------------------------

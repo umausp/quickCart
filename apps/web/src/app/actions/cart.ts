@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { AddToCartRequestSchema, type CartView } from "@quickcart/contracts";
-import { apiAction } from "../../lib/api";
+import { ApiError, apiAction } from "../../lib/api";
 
 /** Every mutation revalidates `/cart` (the page itself) and the root layout (the bottom-nav
  * cart badge lives in `(shop)/layout.tsx`, one level above every page that can add an item). */
@@ -11,15 +11,37 @@ function revalidateCart(): void {
   revalidatePath("/", "layout");
 }
 
-export async function addToCartAction(formData: FormData): Promise<void> {
+export interface AddToCartState {
+  error: string | null;
+}
+
+const ADD_TO_CART_ERROR_MESSAGES: Record<string, string> = {
+  unknown_product: "That item is no longer available.",
+  out_of_stock: "That item just went out of stock.",
+};
+
+/** Bound via `useActionState` (not a plain `(formData) => Promise<void>`) specifically so a
+ * real failure — an item that's gone out of stock, a stale/expired real-Zepto product id —
+ * surfaces as an inline message instead of an uncaught Server Action error, which Next
+ * renders as its generic crash screen requiring a reload. */
+export async function addToCartAction(_prev: AddToCartState, formData: FormData): Promise<AddToCartState> {
   const parsed = AddToCartRequestSchema.parse({
     canonicalSku: formData.get("canonicalSku"),
     sourceId: formData.get("sourceId"),
     sourceProductId: formData.get("sourceProductId"),
     qty: Number(formData.get("qty") ?? 1),
   });
-  await apiAction<CartView>("/cart/items", { method: "POST", body: JSON.stringify(parsed) });
+  try {
+    await apiAction<CartView>("/cart/items", { method: "POST", body: JSON.stringify(parsed) });
+  } catch (err) {
+    if (err instanceof ApiError) {
+      const code = (err.body as { error?: string } | null)?.error;
+      return { error: (code && ADD_TO_CART_ERROR_MESSAGES[code]) ?? "Couldn't add that item. Try again." };
+    }
+    return { error: "Couldn't add that item. Try again." };
+  }
   revalidateCart();
+  return { error: null };
 }
 
 export async function updateCartQtyAction(formData: FormData): Promise<void> {

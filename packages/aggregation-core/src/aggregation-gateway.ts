@@ -54,6 +54,13 @@ export class AggregationGateway {
     return { skuCount: this.catalogue.skuCount, lastRefreshedAt: this.catalogue.lastRefreshedAt };
   }
 
+  /** Exposed so callers with their own (non-mock, e.g. real-Zepto) fetches can share the same
+   * cache instance/backing store instead of standing up a second one — see
+   * `apps/api/src/gateway/search.controller.ts`. */
+  get cache(): CachePort {
+    return this.opts.cache;
+  }
+
   getCanonicalMeta(canonicalSku: string): CanonicalProduct | null {
     return this.catalogue.getCanonicalMeta(canonicalSku);
   }

@@ -1,16 +1,14 @@
-import { connectMcpClient, callTool, type FetchLike } from "@quickcart/mcp-toolkit/client";
+import { connectMcpClient, callTool, type FetchLike, type McpClientHandle } from "@quickcart/mcp-toolkit/client";
 import type { SourceProduct } from "@quickcart/contracts";
 
 /**
  * The real, live Zepto MCP server — a genuinely different integration shape from the other
  * four sources: per-user OAuth (see `zepto-oauth.service.ts`), a *stateful* MCP session (needs
- * `get_location_serviceability` to pick a store before `search_products` works — confirmed by
- * calling the real server directly), and its own tool/response schema (`search_products`
- * happens to share a name with our adaptors' convention, but returns `{ name, price, mrp,
- * imageUrl, availableQuantity, productVariantId, ... }`, nothing like our `SourceProduct`).
- * One-off session per call (no session-id persistence) — simplest correct thing for a
- * request-scoped Worker/Node call, and this route is far lower-traffic than it would need to
- * be before that becomes worth optimizing.
+ * `get_location_serviceability` to pick a store before `search_products`/`get_product_details`
+ * work — confirmed by calling the real server directly), and its own tool/response schemas,
+ * nothing like our `SourceProduct`. One-off session per call (no session-id persistence) —
+ * simplest correct thing for a request-scoped Worker/Node call, and this integration is far
+ * lower-traffic than it would need to be before that becomes worth optimizing.
  */
 
 const ZEPTO_MCP_URL = "https://mcp.zepto.co.in/mcp";
@@ -29,6 +27,20 @@ interface ZeptoSearchProduct {
   availableQuantity?: number;
 }
 
+interface ZeptoProductDetail {
+  productVariantId: string;
+  name: string;
+  brand?: string;
+  category?: string;
+  packSize?: string;
+  images?: string[];
+  mrp: number;
+  sellingPrice: number;
+  availableQuantity?: number;
+  isInStock?: boolean;
+  averageRating?: number;
+}
+
 function authedFetch(accessToken: string): FetchLike {
   return (url, init) => {
     const headers = new Headers(init?.headers);
@@ -37,15 +49,48 @@ function authedFetch(accessToken: string): FetchLike {
   };
 }
 
-function toSourceProduct(p: ZeptoSearchProduct): SourceProduct {
-  const now = new Date().toISOString();
+/** Every real-Zepto `SourceProduct` this module produces shares this canonical-SKU
+ * convention — there's no cross-retailer match for a real item, so each is its own entry.
+ * Exported so the cart layer can recognise "this line came from the real account" without
+ * re-deriving the same string. */
+const ZEPTO_LIVE_PREFIX = "ZEPTO-LIVE-";
+
+export function zeptoLiveCanonicalSku(productVariantId: string): string {
+  return `${ZEPTO_LIVE_PREFIX}${productVariantId}`;
+}
+
+/** Inverse of `zeptoLiveCanonicalSku` — lets a route that only receives a canonical SKU (e.g.
+ * `GET /v1/products/:sku/offers`) recover the real Zepto product id to refetch. */
+export function parseZeptoLiveCanonicalSku(canonicalSku: string): string | null {
+  return canonicalSku.startsWith(ZEPTO_LIVE_PREFIX) ? canonicalSku.slice(ZEPTO_LIVE_PREFIX.length) : null;
+}
+
+function withSession<T>(accessToken: string, fn: (handle: McpClientHandle) => Promise<T>, fallback: T): Promise<T> {
+  return connectMcpClient({ sourceId: "zepto", url: ZEPTO_MCP_URL, clientName: "quickcart-api", fetch: authedFetch(accessToken) }).then(
+    async (handle) => {
+      try {
+        await callTool(handle, "get_location_serviceability", DEMO_LOCATION).catch(() => null);
+        return await fn(handle);
+      } catch (err) {
+        console.error("[zepto-mcp] call failed:", err);
+        return fallback;
+      } finally {
+        await handle.close().catch(() => undefined);
+      }
+    },
+    (err: unknown) => {
+      console.error("[zepto-mcp] connect failed:", err);
+      return fallback;
+    },
+  );
+}
+
+function fromSearchProduct(p: ZeptoSearchProduct): SourceProduct {
   const inStock = (p.availableQuantity ?? 0) > 0;
   return {
     sourceId: "zepto",
     sourceProductId: p.productVariantId,
-    // Real Zepto items have no canonical cross-retailer SKU (there's nothing to match them
-    // against in the other four sources' synthetic catalogues) — each is its own entry.
-    canonicalSku: `ZEPTO-LIVE-${p.productVariantId}`,
+    canonicalSku: zeptoLiveCanonicalSku(p.productVariantId),
     title: p.name,
     brand: "Zepto",
     category: "grocery",
@@ -62,7 +107,31 @@ function toSourceProduct(p: ZeptoSearchProduct): SourceProduct {
     // No checkout adapter for the real account yet (see the module doc comment) — "handoff"
     // is the existing vocabulary for "shown, but QuickCart doesn't place this order itself".
     fulfilment: "handoff",
-    fetchedAt: now,
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
+function fromProductDetail(p: ZeptoProductDetail): SourceProduct {
+  const inStock = p.isInStock ?? (p.availableQuantity ?? 0) > 0;
+  return {
+    sourceId: "zepto",
+    sourceProductId: p.productVariantId,
+    canonicalSku: zeptoLiveCanonicalSku(p.productVariantId),
+    title: p.name,
+    brand: p.brand ?? "Zepto",
+    category: p.category ?? "grocery",
+    packSize: p.packSize ?? "",
+    image: p.images?.[0] ?? "🛒",
+    mrpPaise: Math.round(p.mrp),
+    sellingPricePaise: Math.round(p.sellingPrice),
+    effectivePricePaise: Math.round(p.sellingPrice),
+    inStock,
+    stockQty: p.availableQuantity ?? null,
+    etaMinutes: 10,
+    deliveryFeePaise: 0,
+    rating: p.averageRating ?? null,
+    fulfilment: "handoff",
+    fetchedAt: new Date().toISOString(),
   };
 }
 
@@ -70,28 +139,26 @@ function toSourceProduct(p: ZeptoSearchProduct): SourceProduct {
  * degrade exactly like a dead mock source does everywhere else in this codebase, not break
  * the whole search response. */
 export async function searchRealZepto(accessToken: string, query: string, limit: number): Promise<SourceProduct[]> {
-  const fetchImpl = authedFetch(accessToken);
-  let handle;
-  try {
-    handle = await connectMcpClient({ sourceId: "zepto", url: ZEPTO_MCP_URL, clientName: "quickcart-api", fetch: fetchImpl });
-  } catch (err) {
-    console.error("[zepto-mcp] connect failed:", err);
-    return [];
-  }
+  const products = await withSession(
+    accessToken,
+    async (handle) => {
+      const result = await callTool<{ products?: ZeptoSearchProduct[] }>(handle, "search_products", { query, pageNumber: 1 });
+      return result.products ?? [];
+    },
+    [] as ZeptoSearchProduct[],
+  );
+  return products.slice(0, limit).map(fromSearchProduct);
+}
 
-  try {
-    // Best-effort — a fresh session has no store selected, and `search_products` errors
-    // without one; some sessions (e.g. one already tied to a saved address) don't need this,
-    // so a failure here isn't fatal on its own.
-    await callTool(handle, "get_location_serviceability", DEMO_LOCATION).catch(() => null);
-
-    const result = await callTool<{ products?: ZeptoSearchProduct[] }>(handle, "search_products", { query, pageNumber: 1 });
-    const products = result.products ?? [];
-    return products.slice(0, limit).map(toSourceProduct);
-  } catch (err) {
-    console.error("[zepto-mcp] search_products failed:", err);
-    return [];
-  } finally {
-    await handle.close().catch(() => undefined);
-  }
+/** Live, single-item refetch — used by the cart's "always re-fetch fresh price/stock from the
+ * source before adding" rule (same rule the mock sources already follow via `get_product`).
+ * Returns `null` on any failure, mapped by the caller to the same 404 an unknown mock product
+ * id already produces. */
+export async function getRealZeptoProduct(accessToken: string, productVariantId: string): Promise<SourceProduct | null> {
+  const detail = await withSession(
+    accessToken,
+    (handle) => callTool<ZeptoProductDetail>(handle, "get_product_details", { product_variant_id: productVariantId }),
+    null as ZeptoProductDetail | null,
+  );
+  return detail ? fromProductDetail(detail) : null;
 }

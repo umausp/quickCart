@@ -78,6 +78,20 @@ export async function apiOptionalAuth<T>(path: string, init: RequestInit = {}): 
   return toResult<T>(await rawFetch(path, { ...init, accessToken: session?.accessToken }));
 }
 
+/** Home/search need this to tell "no real results for this query yet" apart from "you're not
+ * connected to anything real" — very different messages. `false` for a guest or on any error;
+ * never throws. */
+export async function isZeptoConnected(): Promise<boolean> {
+  const session = await getSession();
+  if (!session) return false;
+  try {
+    const status = await apiOptionalAuth<{ connected: boolean }>("/connections/zepto/status");
+    return status.connected;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Authenticated **read** — for use in Server Components rendering a page. Deliberately does
  * *not* attempt a token refresh: Next.js forbids mutating cookies outside a Server

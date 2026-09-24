@@ -1,9 +1,11 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { AggregationGateway } from "@quickcart/aggregation-core";
 import { buildCartView, emptyCart, type CartRepositoryPort } from "@quickcart/domain";
-import type { AddToCartRequest, Cart, CartLine, CartView } from "@quickcart/contracts";
+import type { AddToCartRequest, Cart, CartLine, CartView, SourceProduct } from "@quickcart/contracts";
 import { AGGREGATION_GATEWAY } from "../aggregation/aggregation.tokens.js";
 import { AddressesService } from "../addresses/addresses.service.js";
+import { ZeptoOAuthService } from "../zepto/zepto-oauth.service.js";
+import { getRealZeptoProduct } from "../zepto/zepto-mcp-adapter.js";
 import { CART_REPOSITORY } from "./cart.tokens.js";
 
 /**
@@ -18,6 +20,7 @@ export class CartService {
     @Inject(CART_REPOSITORY) private readonly carts: CartRepositoryPort,
     @Inject(AGGREGATION_GATEWAY) private readonly aggregation: AggregationGateway,
     private readonly addresses: AddressesService,
+    private readonly zepto: ZeptoOAuthService,
   ) {}
 
   async getView(userId: string): Promise<CartView> {
@@ -30,7 +33,7 @@ export class CartService {
   }
 
   async addItem(userId: string, req: AddToCartRequest): Promise<CartView> {
-    const product = await this.aggregation.getSourceProduct(req.sourceId, req.sourceProductId);
+    const product = await this.fetchSourceProduct(userId, req);
     if (!product) throw new NotFoundException({ error: "unknown_product" });
     if (!product.inStock) throw new BadRequestException({ error: "out_of_stock", sourceId: req.sourceId });
 
@@ -96,6 +99,22 @@ export class CartService {
     cart.addressId = address.id;
     cart.pincode = address.pincode;
     return this.persist(cart);
+  }
+
+  /**
+   * "zepto" resolves to one of two completely different backends depending on the requesting
+   * user (same rule `/v1/search` already applies): a real, personally-connected account gets
+   * a live refetch via the real MCP server; everyone else gets the shared mock retailer. This
+   * is what makes "add to cart" work for a real search result at all — the mock zepto worker
+   * has never heard of a real Zepto `productVariantId` and would 404 on it (which is exactly
+   * what was happening before this existed).
+   */
+  private async fetchSourceProduct(userId: string, req: AddToCartRequest): Promise<SourceProduct | null> {
+    if (req.sourceId === "zepto") {
+      const accessToken = await this.zepto.getValidAccessToken(userId);
+      if (accessToken) return getRealZeptoProduct(accessToken, req.sourceProductId);
+    }
+    return this.aggregation.getSourceProduct(req.sourceId, req.sourceProductId);
   }
 
   private async getOrCreateCart(userId: string): Promise<Cart> {

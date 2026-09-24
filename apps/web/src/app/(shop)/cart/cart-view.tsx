@@ -13,7 +13,7 @@ import AddIcon from "@mui/icons-material/Add";
 import RemoveIcon from "@mui/icons-material/Remove";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutlineOutlined";
 import type { CartView as CartViewData } from "@quickcart/contracts";
-import { EmptyState, SourceChip, formatEta, formatRupees } from "@quickcart/ui";
+import { EmptyState, ProductThumb, SourceChip, formatEta, formatRupees } from "@quickcart/ui";
 import { removeCartItemAction, updateCartQtyAction } from "../../actions/cart";
 
 /**
@@ -55,7 +55,9 @@ export function CartView({ cart }: { cart: CartViewData }) {
       <Stack spacing={1.5}>
         {group.lines.map((line) => (
           <Box key={line.lineId} sx={{ display: "flex", alignItems: "center", gap: 1.5, p: 1.5, border: "1px solid #ececec", borderRadius: 2 }}>
-            <Box sx={{ fontSize: "2rem" }}>{line.image}</Box>
+            <Box sx={{ fontSize: "2rem", flexShrink: 0 }}>
+              <ProductThumb image={line.image} alt={line.title} size={40} />
+            </Box>
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <Typography variant="body2" sx={{ fontWeight: 700 }} noWrap>
                 {line.title}

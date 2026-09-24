@@ -4,7 +4,7 @@ import Divider from "@mui/material/Divider";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import type { ProductOffersResponse } from "@quickcart/contracts";
-import { EtaBadge, ExcludedSourceRow, PriceBlock, SourceCompareRow, formatEta, formatRupees } from "@quickcart/ui";
+import { EtaBadge, ExcludedSourceRow, PriceBlock, ProductThumb, SourceCompareRow, formatEta, formatRupees } from "@quickcart/ui";
 import { apiPublic } from "../../../../lib/api";
 import { AddToCartButton } from "../../add-to-cart-button";
 
@@ -24,7 +24,9 @@ export default async function ProductDetailPage({
   return (
     <Container maxWidth="sm" sx={{ py: 3, pb: 14 }}>
       <Stack spacing={2}>
-        <Box sx={{ height: 140, borderRadius: 3, bgcolor: "grey.100", display: "grid", placeItems: "center", fontSize: "3.5rem" }}>{product.image}</Box>
+        <Box sx={{ height: 140, borderRadius: 3, bgcolor: "grey.100", display: "grid", placeItems: "center", fontSize: "3.5rem", overflow: "hidden" }}>
+          <ProductThumb image={product.image} alt={product.title} fill />
+        </Box>
 
         <Box>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>

@@ -5,13 +5,14 @@ import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { DEFAULT_CATEGORIES, type SearchResponse } from "@quickcart/contracts";
 import { EmptyState } from "@quickcart/ui";
-import { apiOptionalAuth } from "../../../lib/api";
+import { apiOptionalAuth, isZeptoConnected } from "../../../lib/api";
 import { SearchBox } from "../search/search-box";
 import { ResultCard } from "../result-card";
+import { LinkButton } from "../link-components";
 import { CategoryLink } from "./category-link";
 
 export default async function HomePage() {
-  const deals = await apiOptionalAuth<SearchResponse>("/search?limit=8");
+  const [deals, connected] = await Promise.all([apiOptionalAuth<SearchResponse>("/search?limit=8"), isZeptoConnected()]);
 
   return (
     <Container maxWidth="lg" sx={{ py: 3 }}>
@@ -28,7 +29,7 @@ export default async function HomePage() {
             Everything, in minutes ⚡
           </Typography>
           <Typography variant="body2" sx={{ opacity: 0.9, mb: 2 }}>
-            One search across Blinkit, Zepto, BigBasket, Flipkart &amp; Amazon — we buy you the best.
+            Real, live results from your connected Zepto account — no demo data.
           </Typography>
           <SearchBox action="/search/results" placeholder="Search milk, eggs, earbuds…" light />
         </Box>
@@ -51,7 +52,20 @@ export default async function HomePage() {
             Best deals near you
           </Typography>
           {deals.results.length === 0 ? (
-            <EmptyState icon="🔍" title="No deals yet" subtitle="Try searching for a product." />
+            connected ? (
+              <EmptyState icon="🔍" title="No deals right now" subtitle="Try searching for a product instead." />
+            ) : (
+              <EmptyState
+                icon="🔗"
+                title="Connect Zepto to see real deals"
+                subtitle="QuickCart only shows real data — connect your account to start browsing."
+                action={
+                  <LinkButton href="/profile" variant="contained">
+                    Connect Zepto
+                  </LinkButton>
+                }
+              />
+            )
           ) : (
             <Grid container spacing={2}>
               {deals.results.map((card) => (

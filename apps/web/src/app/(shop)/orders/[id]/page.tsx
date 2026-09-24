@@ -5,7 +5,7 @@ import Divider from "@mui/material/Divider";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import type { Order } from "@quickcart/contracts";
-import { SourceChip, formatEta, formatRupees } from "@quickcart/ui";
+import { ProductThumb, SourceChip, formatEta, formatRupees } from "@quickcart/ui";
 import { ApiError, apiRead } from "../../../../lib/api";
 
 const STATUS_COLOR: Record<string, "success" | "warning" | "error" | "default"> = {
@@ -72,10 +72,13 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             </Stack>
             <Stack spacing={0.5}>
               {sub.items.map((item) => (
-                <Stack key={item.sourceProductId} direction="row" sx={{ justifyContent: "space-between" }}>
-                  <Typography variant="body2">
-                    {item.image} {item.title} × {item.qty}
-                  </Typography>
+                <Stack key={item.sourceProductId} direction="row" sx={{ justifyContent: "space-between", alignItems: "center" }}>
+                  <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                    <ProductThumb image={item.image} alt={item.title} size={24} />
+                    <Typography variant="body2">
+                      {item.title} × {item.qty}
+                    </Typography>
+                  </Stack>
                   <Typography variant="body2" color={item.state === "confirmed" ? "text.primary" : "text.secondary"}>
                     {item.state === "confirmed" ? formatRupees(item.unitPricePaise * item.qty) : item.state}
                   </Typography>

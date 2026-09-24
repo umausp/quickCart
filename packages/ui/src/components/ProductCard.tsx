@@ -9,6 +9,7 @@ import Stack from "@mui/material/Stack";
 import type { SearchResultCard } from "@quickcart/contracts";
 import { EtaBadge } from "./EtaBadge.js";
 import { PriceBlock } from "./PriceBlock.js";
+import { ProductThumb } from "./ProductThumb.js";
 import { SOURCE_META } from "@quickcart/contracts";
 
 /**
@@ -32,9 +33,10 @@ export function ProductCard({ card, onClick, actionSlot }: { card: SearchResultC
               placeItems: "center",
               fontSize: "2.25rem",
               position: "relative",
+              overflow: "hidden",
             }}
           >
-            {card.image}
+            <ProductThumb image={card.image} alt={card.title} fill />
             <Box sx={{ position: "absolute", top: 8, right: 8 }}>
               <EtaBadge minutes={best.etaMinutes} />
             </Box>

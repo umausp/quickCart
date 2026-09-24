@@ -36,7 +36,7 @@ export default async function ProductDetailPage({
   return (
     <Container maxWidth="sm" sx={{ py: 3, pb: 14 }}>
       <Stack spacing={2}>
-        <Box sx={{ height: 140, borderRadius: 3, bgcolor: "grey.100", display: "grid", placeItems: "center", fontSize: "3.5rem", overflow: "hidden" }}>
+        <Box sx={{ height: 260, borderRadius: 3, bgcolor: "grey.100", display: "grid", placeItems: "center", fontSize: "3.5rem", overflow: "hidden" }}>
           <ProductThumb image={product.image} alt={product.title} fill />
         </Box>
 

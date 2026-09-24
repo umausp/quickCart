@@ -26,7 +26,7 @@ export function ProductCard({ card, onClick, actionSlot }: { card: SearchResultC
         <Stack spacing={1}>
           <Box
             sx={{
-              height: 96,
+              height: 160,
               borderRadius: 3,
               bgcolor: "grey.100",
               display: "grid",

@@ -23,8 +23,11 @@ export function ProductThumb({ image, alt = "", size, fill = false }: { image: s
     return <span style={size ? { fontSize: size, lineHeight: 1 } : { lineHeight: 1 }}>{failed ? FALLBACK_EMOJI : image}</span>;
   }
 
+  // "contain" (not "cover") in fill mode: real product photos aren't reliably square, and
+  // cropping to fill a short box was cutting most of the image away, leaving only a sliver
+  // near the top visible — reported directly against the live cards/detail page.
   const style: CSSProperties = fill
-    ? { width: "100%", height: "100%", objectFit: "cover", borderRadius: "inherit" }
+    ? { width: "100%", height: "100%", objectFit: "contain", borderRadius: "inherit" }
     : { width: size ?? 32, height: size ?? 32, objectFit: "cover", borderRadius: 8, verticalAlign: "middle" };
   return <img src={image} alt={alt} style={style} onError={() => setFailed(true)} />;
 }

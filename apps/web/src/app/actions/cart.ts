@@ -23,16 +23,23 @@ const ADD_TO_CART_ERROR_MESSAGES: Record<string, string> = {
 /** Bound via `useActionState` (not a plain `(formData) => Promise<void>`) specifically so a
  * real failure — an item that's gone out of stock, a stale/expired real-Zepto product id —
  * surfaces as an inline message instead of an uncaught Server Action error, which Next
- * renders as its generic crash screen requiring a reload. */
+ * renders as its generic crash screen requiring a reload. The *entire* body is inside the
+ * try/catch, deliberately — an earlier version only wrapped the API call, and a validation
+ * error thrown by `.parse()` (outside that block) still crashed the same way this was meant
+ * to prevent. */
 export async function addToCartAction(_prev: AddToCartState, formData: FormData): Promise<AddToCartState> {
-  const parsed = AddToCartRequestSchema.parse({
-    canonicalSku: formData.get("canonicalSku"),
-    sourceId: formData.get("sourceId"),
-    sourceProductId: formData.get("sourceProductId"),
-    qty: Number(formData.get("qty") ?? 1),
-  });
   try {
-    await apiAction<CartView>("/cart/items", { method: "POST", body: JSON.stringify(parsed) });
+    const result = AddToCartRequestSchema.safeParse({
+      canonicalSku: formData.get("canonicalSku"),
+      sourceId: formData.get("sourceId"),
+      sourceProductId: formData.get("sourceProductId"),
+      qty: Number(formData.get("qty") ?? 1),
+    });
+    if (!result.success) return { error: "Couldn't add that item. Try again." };
+
+    await apiAction<CartView>("/cart/items", { method: "POST", body: JSON.stringify(result.data) });
+    revalidateCart();
+    return { error: null };
   } catch (err) {
     if (err instanceof ApiError) {
       const code = (err.body as { error?: string } | null)?.error;
@@ -40,8 +47,6 @@ export async function addToCartAction(_prev: AddToCartState, formData: FormData)
     }
     return { error: "Couldn't add that item. Try again." };
   }
-  revalidateCart();
-  return { error: null };
 }
 
 export async function updateCartQtyAction(formData: FormData): Promise<void> {

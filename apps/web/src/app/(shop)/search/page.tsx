@@ -32,7 +32,7 @@ export default function SearchLandingPage() {
           </Typography>
           <Stack direction="row" sx={{ flexWrap: "wrap", gap: 1 }}>
             {DEFAULT_CATEGORIES.map((category) => (
-              <LinkChip key={category.id} href={`/search/results?q=${category.id}`} label={`${category.icon} ${category.name}`} variant="outlined" />
+              <LinkChip key={category.id} href={`/search/results?q=${encodeURIComponent(category.id)}`} label={`${category.icon} ${category.name}`} variant="outlined" />
             ))}
           </Stack>
         </Stack>

@@ -54,3 +54,32 @@ export interface AuthStatePort {
   setRefreshToken(token: string, record: { userId: string; expiresAt: number }): Promise<void>;
   deleteRefreshToken(token: string): Promise<void>;
 }
+
+/** In-flight PKCE handshake for one `/connections/zepto/start` call — `userId` is set when an
+ * already-logged-in shopper is linking Zepto from their profile; `null` when "Continue with
+ * Zepto" *is* the login (no QuickCart session exists yet), in which case `completeConnect`
+ * finds-or-creates the QuickCart user itself once the real token comes back. */
+export interface ZeptoOAuthState {
+  codeVerifier: string;
+  userId: string | null;
+}
+
+/** A live connection to one shopper's real Zepto account, obtained via real OAuth 2.1 + PKCE
+ * against `auth.zepto.co.in` — see CLOUDFLARE-MIGRATION-PLAN.md / the Zepto integration notes
+ * for why this is a genuinely different trust model than the other four (shared,
+ * QuickCart-run, no-login) MCP sources: this token belongs to one specific human's real
+ * account, calls real `mcp.zepto.co.in`, and can place real orders with their real money. */
+export interface ZeptoConnection {
+  accessToken: string;
+  refreshToken: string | null;
+  expiresAt: number;
+  connectedAt: string;
+}
+
+export interface ZeptoConnectionPort {
+  saveState(state: string, value: ZeptoOAuthState, ttlSeconds: number): Promise<void>;
+  consumeState(state: string): Promise<ZeptoOAuthState | null>;
+  getConnection(userId: string): Promise<ZeptoConnection | null>;
+  saveConnection(userId: string, connection: ZeptoConnection): Promise<void>;
+  deleteConnection(userId: string): Promise<void>;
+}

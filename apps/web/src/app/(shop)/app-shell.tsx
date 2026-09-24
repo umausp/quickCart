@@ -22,10 +22,12 @@ const NAV_ITEMS = [
   { href: "/search", label: "Search", icon: <SearchIcon /> },
   { href: "/cart", label: "Cart", icon: <ShoppingCartIcon /> },
   { href: "/orders", label: "Orders", icon: <Inventory2Icon /> },
-  { href: "/addresses", label: "Profile", icon: <PersonIcon /> },
+  { href: "/profile", label: "Profile", icon: <PersonIcon /> },
 ];
 
 function activeIndexFor(pathname: string): number {
+  // Addresses is reached from Profile (not its own tab), so it still highlights Profile.
+  if (pathname.startsWith("/addresses")) return NAV_ITEMS.findIndex((item) => item.href === "/profile");
   const index = NAV_ITEMS.findIndex((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
   return index === -1 ? 0 : index;
 }
@@ -38,6 +40,7 @@ const TITLES: Array<[string, string]> = [
   ["/checkout", "Checkout"],
   ["/orders", "Orders"],
   ["/addresses", "Addresses"],
+  ["/profile", "Profile"],
   ["/products", "Product"],
 ];
 

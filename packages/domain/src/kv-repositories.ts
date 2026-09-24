@@ -1,5 +1,14 @@
 import type { Address, Cart, Order, UpsertAddressInput, User } from "@quickcart/contracts";
-import type { AddressRepositoryPort, AuthStatePort, CartRepositoryPort, OrderRepositoryPort, UserRepositoryPort } from "./ports.js";
+import type {
+  AddressRepositoryPort,
+  AuthStatePort,
+  CartRepositoryPort,
+  OrderRepositoryPort,
+  UserRepositoryPort,
+  ZeptoConnection,
+  ZeptoConnectionPort,
+  ZeptoOAuthState,
+} from "./ports.js";
 
 /** The minimal shape of Cloudflare's real `KVNamespace` binding these adapters use — declared
  * locally (not `@cloudflare/workers-types`) so this package stays free of a Workers-only
@@ -210,5 +219,35 @@ export class KvAuthStateRepository implements AuthStatePort {
 
   async deleteRefreshToken(token: string): Promise<void> {
     await this.kv.delete(`refresh:${token}`);
+  }
+}
+
+/** Same semantics as `InMemoryZeptoConnectionRepository`; `saveState`'s short TTL and
+ * `saveConnection`'s token expiry both use KV's native `expirationTtl`. */
+export class KvZeptoConnectionRepository implements ZeptoConnectionPort {
+  constructor(private readonly kv: KVNamespaceLike) {}
+
+  async saveState(state: string, value: ZeptoOAuthState, ttlSeconds: number): Promise<void> {
+    await this.kv.put(`zepto-oauth-state:${state}`, JSON.stringify(value), { expirationTtl: Math.max(60, ttlSeconds) });
+  }
+
+  async consumeState(state: string): Promise<ZeptoOAuthState | null> {
+    const key = `zepto-oauth-state:${state}`;
+    const raw = await this.kv.get(key);
+    await this.kv.delete(key);
+    return raw ? (JSON.parse(raw) as ZeptoOAuthState) : null;
+  }
+
+  async getConnection(userId: string): Promise<ZeptoConnection | null> {
+    const raw = await this.kv.get(`zepto-connection:${userId}`);
+    return raw ? (JSON.parse(raw) as ZeptoConnection) : null;
+  }
+
+  async saveConnection(userId: string, connection: ZeptoConnection): Promise<void> {
+    await this.kv.put(`zepto-connection:${userId}`, JSON.stringify(connection));
+  }
+
+  async deleteConnection(userId: string): Promise<void> {
+    await this.kv.delete(`zepto-connection:${userId}`);
   }
 }

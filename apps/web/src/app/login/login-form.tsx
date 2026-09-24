@@ -4,10 +4,12 @@ import { useActionState } from "react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
+import Divider from "@mui/material/Divider";
 import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import { requestOtpAction, verifyOtpAction, type OtpRequestState, type OtpVerifyState } from "../actions/auth";
+import { startZeptoConnectAction } from "../actions/zepto";
 
 const initialRequestState: OtpRequestState = { error: null, devOtp: null, phone: "" };
 const initialVerifyState: OtpVerifyState = { error: null, phone: "" };
@@ -70,6 +72,21 @@ export function LoginForm() {
               {verifyPending ? "Verifying…" : "Verify & continue"}
             </Button>
           </Stack>
+        )}
+
+        {step === "phone" && (
+          <>
+            <Divider sx={{ my: 3 }}>or</Divider>
+            <Stack component="form" action={startZeptoConnectAction}>
+              <Button type="submit" variant="outlined" size="large" fullWidth sx={{ borderColor: "#7b2ff7", color: "#7b2ff7" }}>
+                Continue with Zepto
+              </Button>
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 1, textAlign: "center" }}>
+                Real Zepto login — you'll see Zepto's own sign-in page, then come back here to
+                finish connecting.
+              </Typography>
+            </Stack>
+          </>
         )}
       </Box>
     </Box>

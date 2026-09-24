@@ -35,6 +35,6 @@ const JWT_SECRET = process.env.JWT_SECRET ?? "quickcart-dev-secret-do-not-use-in
       inject: [JwtService],
     },
   ],
-  exports: [AuthService, JwtAuthGuard, JwtModule, JWT_PORT],
+  exports: [AuthService, JwtAuthGuard, JwtModule, JWT_PORT, USER_REPOSITORY],
 })
 export class AuthModule {}

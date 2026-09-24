@@ -2,7 +2,15 @@ import { Hono } from "hono";
 import { HttpException } from "@nestjs/common";
 import { AggregationGateway, KvOfferCache, McpSourceClientFactory, type SourceClientFactory } from "@quickcart/aggregation-core";
 import type { FetchLike } from "@quickcart/mcp-toolkit/client";
-import { KvAddressRepository, KvAuthStateRepository, KvCartRepository, KvOrderRepository, KvUserRepository, type KVNamespaceLike as DomainKv } from "@quickcart/domain";
+import {
+  KvAddressRepository,
+  KvAuthStateRepository,
+  KvCartRepository,
+  KvOrderRepository,
+  KvUserRepository,
+  KvZeptoConnectionRepository,
+  type KVNamespaceLike as DomainKv,
+} from "@quickcart/domain";
 import {
   AddToCartRequestSchema,
   PlaceOrderRequestSchema,
@@ -22,6 +30,8 @@ import { createJoseJwtPort } from "./jwt-jose.js";
 import { CartService } from "./cart/cart.service.js";
 import { OrderOrchestrator } from "./orders/orchestrator.js";
 import { OrdersService } from "./orders/orders.service.js";
+import { loadZeptoConfig } from "./zepto/zepto.config.js";
+import { ZeptoOAuthService } from "./zepto/zepto-oauth.service.js";
 
 /**
  * The Cloudflare Workers entrypoint for the whole backend — same layered architecture
@@ -52,6 +62,17 @@ export interface Env {
   BIGBASKET_SERVICE: Fetcher;
   FLIPKART_SERVICE: Fetcher;
   AMAZON_SERVICE: Fetcher;
+  // Real Zepto OAuth (a genuinely different, per-user-authenticated MCP source — see
+  // apps/api/src/zepto/). Every field is optional so the defaults baked into loadZeptoConfig
+  // (the real, live-registered DCR client) apply without any wrangler.jsonc vars needed.
+  // Prefixed ZEPTO_OAUTH_*, never ZEPTO_MCP_URL, so it can't collide with the *mock* zepto
+  // retailer's override above.
+  ZEPTO_OAUTH_CLIENT_ID?: string;
+  ZEPTO_OAUTH_REDIRECT_URI?: string;
+  ZEPTO_OAUTH_AUTHORIZE_URL?: string;
+  ZEPTO_OAUTH_TOKEN_URL?: string;
+  ZEPTO_OAUTH_MCP_URL?: string;
+  ZEPTO_OAUTH_SCOPE?: string;
 }
 
 const DEFAULT_LOCATION = { pincode: "560001" };
@@ -70,6 +91,7 @@ interface Services {
   cart: CartService;
   orders: OrdersService;
   jwt: ReturnType<typeof createJoseJwtPort>;
+  zepto: ZeptoOAuthService;
 }
 
 // Module-scope cache: Workers *may* reuse the same isolate across several requests, saving
@@ -121,7 +143,11 @@ function buildServices(env: Env): Services {
   const orchestrator = new OrderOrchestrator(aggregation);
   const orders = new OrdersService(orderRepo, cart, addresses, orchestrator);
 
-  cachedServices = { aggregation, auth, addresses, cart, orders, jwt };
+  const zeptoConfig = loadZeptoConfig(env as unknown as Record<string, string | undefined>);
+  const zeptoConnections = new KvZeptoConnectionRepository(kv);
+  const zepto = new ZeptoOAuthService(zeptoConnections, users, auth, zeptoConfig);
+
+  cachedServices = { aggregation, auth, addresses, cart, orders, jwt, zepto };
   return cachedServices;
 }
 
@@ -202,6 +228,40 @@ app.post("/v1/auth/refresh", async (c) => {
   const { auth } = buildServices(c.env);
   const { refreshToken } = await c.req.json<{ refreshToken: string }>();
   return c.json(await auth.refresh(refreshToken));
+});
+
+// ---- Real Zepto connection (start/complete are auth-optional — see zepto.controller.ts's
+// doc comment; the same "Continue with Zepto" flow is both a login and a profile-page link) --
+
+app.post("/v1/connections/zepto/start", async (c) => {
+  const { zepto, jwt } = buildServices(c.env);
+  const header = c.req.header("authorization") ?? "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : null;
+  const userId = token
+    ? await jwt
+        .verify<JwtClaims>(token)
+        .then((claims) => claims.sub)
+        .catch(() => null)
+    : null;
+  return c.json(await zepto.beginConnect(userId));
+});
+
+app.post("/v1/connections/zepto/complete", async (c) => {
+  const { zepto } = buildServices(c.env);
+  const body = await c.req.json<{ code?: string; state?: string }>();
+  if (!body.code || !body.state) return c.json({ error: "missing_code_or_state" }, 400);
+  return c.json(await zepto.completeConnect(body.code, body.state));
+});
+
+app.get("/v1/connections/zepto/status", requireAuth, async (c) => {
+  const { zepto } = buildServices(c.env);
+  return c.json(await zepto.getStatus(c.get("user").sub));
+});
+
+app.delete("/v1/connections/zepto", requireAuth, async (c) => {
+  const { zepto } = buildServices(c.env);
+  await zepto.disconnect(c.get("user").sub);
+  return c.json({ disconnected: true });
 });
 
 // ---- Addresses (authed) ---------------------------------------------------------------------

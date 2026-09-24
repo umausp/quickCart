@@ -1,6 +1,6 @@
 import "server-only";
 import { cookies } from "next/headers";
-import type { AuthTokens } from "@quickcart/contracts";
+import type { AuthTokens, JwtClaims } from "@quickcart/contracts";
 
 /**
  * The BFF's whole job in three functions: hold the JWT pair in httpOnly cookies so the
@@ -36,4 +36,20 @@ export async function clearSession(): Promise<void> {
   const store = await cookies();
   store.delete(ACCESS_COOKIE);
   store.delete(REFRESH_COOKIE);
+}
+
+/** Unverified decode of the access token's own claims, for display only (name/phone on the
+ * profile page) — every real write still goes through the API, which verifies the signature
+ * itself; this just avoids a round trip for read-only chrome. */
+export async function getCurrentClaims(): Promise<JwtClaims | null> {
+  const session = await getSession();
+  if (!session) return null;
+  const parts = session.accessToken.split(".");
+  if (parts.length !== 3) return null;
+  try {
+    const json = atob(parts[1]!.replace(/-/g, "+").replace(/_/g, "/"));
+    return JSON.parse(json) as JwtClaims;
+  } catch {
+    return null;
+  }
 }

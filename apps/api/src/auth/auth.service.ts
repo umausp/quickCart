@@ -51,7 +51,10 @@ export class AuthService {
     return this.issueTokens(user);
   }
 
-  private async issueTokens(user: User): Promise<AuthTokens> {
+  /** Public on purpose: `ZeptoOAuthService` mints a real QuickCart session the same way OTP
+   * verification does once a real Zepto connection resolves to a QuickCart user — one login
+   * mechanism, two ways to reach it. */
+  async issueTokens(user: User): Promise<AuthTokens> {
     const claims: JwtClaims = { sub: user.id, phone: user.phone, name: user.name, deliveryZone: user.defaultPincode };
     const accessToken = await this.jwt.sign(claims, { expiresIn: "15m" });
     const refreshToken = crypto.randomUUID();

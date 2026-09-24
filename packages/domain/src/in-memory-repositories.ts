@@ -1,5 +1,14 @@
 import type { Address, Cart, Order, UpsertAddressInput, User } from "@quickcart/contracts";
-import type { AddressRepositoryPort, AuthStatePort, CartRepositoryPort, OrderRepositoryPort, UserRepositoryPort } from "./ports.js";
+import type {
+  AddressRepositoryPort,
+  AuthStatePort,
+  CartRepositoryPort,
+  OrderRepositoryPort,
+  UserRepositoryPort,
+  ZeptoConnection,
+  ZeptoConnectionPort,
+  ZeptoOAuthState,
+} from "./ports.js";
 
 /**
  * In-process repository adapters — the ideation-scope default behind every port above. Data
@@ -153,5 +162,33 @@ export class InMemoryAuthStateRepository implements AuthStatePort {
 
   async deleteRefreshToken(token: string): Promise<void> {
     this.refreshTokens.delete(token);
+  }
+}
+
+export class InMemoryZeptoConnectionRepository implements ZeptoConnectionPort {
+  private readonly states = new Map<string, { value: ZeptoOAuthState; expiresAt: number }>();
+  private readonly connections = new Map<string, ZeptoConnection>();
+
+  async saveState(state: string, value: ZeptoOAuthState, ttlSeconds: number): Promise<void> {
+    this.states.set(state, { value, expiresAt: Date.now() + ttlSeconds * 1000 });
+  }
+
+  async consumeState(state: string): Promise<ZeptoOAuthState | null> {
+    const record = this.states.get(state);
+    this.states.delete(state);
+    if (!record || Date.now() > record.expiresAt) return null;
+    return record.value;
+  }
+
+  async getConnection(userId: string): Promise<ZeptoConnection | null> {
+    return this.connections.get(userId) ?? null;
+  }
+
+  async saveConnection(userId: string, connection: ZeptoConnection): Promise<void> {
+    this.connections.set(userId, connection);
+  }
+
+  async deleteConnection(userId: string): Promise<void> {
+    this.connections.delete(userId);
   }
 }

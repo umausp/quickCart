@@ -46,6 +46,11 @@ export class ZeptoOAuthService {
     url.searchParams.set("code_challenge_method", "S256");
     url.searchParams.set("state", state);
     url.searchParams.set("scope", this.config.scope);
+    // RFC 8707 Resource Indicator — without this, Zepto issues a token whose `aud` claim is
+    // just our own client_id, and `mcp.zepto.co.in` rejects it outright with "token is not
+    // intended for this resource" (confirmed against the real server). Must be sent on both
+    // this request and the token exchange below for the audience to end up right.
+    url.searchParams.set("resource", this.config.mcpUrl);
     return { authorizeUrl: url.toString() };
   }
 
@@ -59,6 +64,7 @@ export class ZeptoOAuthService {
       redirect_uri: this.config.redirectUri,
       client_id: this.config.clientId,
       code_verifier: pending.codeVerifier,
+      resource: this.config.mcpUrl,
     });
 
     const user = pending.userId ? await this.mustFindUser(pending.userId) : await this.findOrCreateUserForZepto(token.access_token);
@@ -101,6 +107,7 @@ export class ZeptoOAuthService {
         grant_type: "refresh_token",
         refresh_token: connection.refreshToken,
         client_id: this.config.clientId,
+        resource: this.config.mcpUrl,
       });
     } catch {
       await this.connections.deleteConnection(userId);

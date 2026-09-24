@@ -1,4 +1,3 @@
-import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
@@ -6,10 +5,11 @@ import CardContent from "@mui/material/CardContent";
 import Chip from "@mui/material/Chip";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
-import { disconnectZeptoAction, startZeptoConnectAction } from "../../actions/zepto";
+import { disconnectZeptoAction } from "../../actions/zepto";
 import { logoutAction } from "../../actions/auth";
 import { apiRead } from "../../../lib/api";
 import { getCurrentClaims } from "../../../lib/session";
+import { ZeptoConnectFlow } from "../../zepto-connect-flow";
 import { LinkButton } from "../link-components";
 
 interface ZeptoStatus {
@@ -65,18 +65,9 @@ export default async function ProfilePage() {
                 Connect your real Zepto account for live prices, stock and checkout. Without it,
                 QuickCart still shows Zepto&apos;s demo catalogue alongside the other four stores.
               </Typography>
-              <form action={startZeptoConnectAction}>
-                <Button type="submit" variant="contained" sx={{ bgcolor: "#7b2ff7", "&:hover": { bgcolor: "#6a20e0" } }}>
-                  Connect Zepto
-                </Button>
-              </form>
+              <ZeptoConnectFlow buttonLabel="Connect Zepto" />
             </>
           )}
-
-          <Alert severity="info" sx={{ mt: 1 }}>
-            Real OAuth login — Zepto only allows a local-machine redirect for this integration,
-            so after signing in you&apos;ll paste a URL back into QuickCart to finish connecting.
-          </Alert>
         </CardContent>
       </Card>
 

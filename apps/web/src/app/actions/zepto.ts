@@ -10,16 +10,16 @@ import { getSession, setSession } from "../../lib/session";
  * The one non-standard step: Zepto only whitelists loopback/native-app redirect URIs, and
  * QuickCart is a hosted web app with no localhost callback to receive them on, so the
  * shopper's browser ends up on a "can't connect to localhost" page with the real
- * authorization code sitting in the URL. `startZeptoConnectAction` kicks off that redirect;
- * `completeZeptoConnectAction` (on `/connect/zepto/finish`) is where they paste it back.
+ * authorization code sitting in the URL. `getZeptoAuthorizeUrlAction` returns that URL (rather
+ * than redirecting) so the caller can open it in a new tab and keep the *original* tab on the
+ * paste-back form the whole time — see `ZeptoConnectFlow`, which is the actual UI for this.
  */
-export async function startZeptoConnectAction(): Promise<void> {
+export async function getZeptoAuthorizeUrlAction(): Promise<{ authorizeUrl: string }> {
   const session = await getSession();
   const path = "/connections/zepto/start";
-  const { authorizeUrl } = session
-    ? await apiAction<{ authorizeUrl: string }>(path, { method: "POST" })
-    : await apiPublic<{ authorizeUrl: string }>(path, { method: "POST" });
-  redirect(authorizeUrl);
+  return session
+    ? apiAction<{ authorizeUrl: string }>(path, { method: "POST" })
+    : apiPublic<{ authorizeUrl: string }>(path, { method: "POST" });
 }
 
 export interface ZeptoConnectState {

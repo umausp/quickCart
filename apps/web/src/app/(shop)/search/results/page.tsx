@@ -27,7 +27,7 @@ export default async function SearchResultsPage({ searchParams }: { searchParams
   return (
     <Container maxWidth="lg" sx={{ py: 3 }}>
       <Stack spacing={2}>
-        <SearchBox action="/search/results" placeholder="Search milk, eggs, earbuds…" defaultValue={q} />
+        <SearchBox action="/search/results" placeholder="Search milk, eggs, earbuds…" defaultValue={q} autoFocus={false} />
 
         <Stack direction="row" spacing={1}>
           {MODES.map((m) => (

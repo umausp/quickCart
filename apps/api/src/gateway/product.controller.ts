@@ -6,7 +6,7 @@ import { JWT_PORT } from "../auth/auth.tokens.js";
 import type { JwtPort } from "../auth/jwt-port.js";
 import { TransformService } from "../transform/transform.service.js";
 import { ZeptoOAuthService } from "../zepto/zepto-oauth.service.js";
-import { getRealZeptoProduct, parseZeptoLiveCanonicalSku } from "../zepto/zepto-mcp-adapter.js";
+import { getCachedRealZeptoProduct, parseZeptoLiveCanonicalSku } from "../zepto/zepto-mcp-adapter.js";
 import { weightsForMode } from "./ranking-mode.js";
 
 /**
@@ -44,7 +44,7 @@ export class ProductController {
     const accessToken = await this.getValidZeptoToken(authHeader);
     if (!accessToken) throw new NotFoundException({ error: "unknown_sku", sku });
 
-    const product = await getRealZeptoProduct(accessToken, productVariantId);
+    const product = await getCachedRealZeptoProduct(this.aggregation.cache, accessToken, productVariantId);
     if (!product) throw new NotFoundException({ error: "unknown_sku", sku });
 
     const meta = { canonicalSku: product.canonicalSku, title: product.title, brand: product.brand, category: product.category, packSize: product.packSize, image: product.image };

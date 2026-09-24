@@ -32,7 +32,7 @@ import { OrderOrchestrator } from "./orders/orchestrator.js";
 import { OrdersService } from "./orders/orders.service.js";
 import { loadZeptoConfig } from "./zepto/zepto.config.js";
 import { ZeptoOAuthService } from "./zepto/zepto-oauth.service.js";
-import { getRealZeptoProduct, parseZeptoLiveCanonicalSku, searchRealZepto } from "./zepto/zepto-mcp-adapter.js";
+import { getCachedRealZeptoProduct, parseZeptoLiveCanonicalSku, searchRealZepto } from "./zepto/zepto-mcp-adapter.js";
 
 /**
  * The Cloudflare Workers entrypoint for the whole backend — same layered architecture
@@ -245,7 +245,7 @@ app.get("/v1/products/:sku/offers", async (c) => {
       : null;
     if (!accessToken) return c.json({ error: "unknown_sku", sku }, 404);
 
-    const product = await getRealZeptoProduct(accessToken, productVariantId);
+    const product = await getCachedRealZeptoProduct(aggregation.cache, accessToken, productVariantId);
     if (!product) return c.json({ error: "unknown_sku", sku }, 404);
 
     const meta = { canonicalSku: product.canonicalSku, title: product.title, brand: product.brand, category: product.category, packSize: product.packSize, image: product.image };

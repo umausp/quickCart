@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import Box from "@mui/material/Box";
 import Container from "@mui/material/Container";
 import Divider from "@mui/material/Divider";
@@ -5,10 +6,15 @@ import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import type { ProductOffersResponse } from "@quickcart/contracts";
 import { EtaBadge, ExcludedSourceRow, PriceBlock, ProductThumb, SourceCompareRow, formatEta, formatRupees } from "@quickcart/ui";
-import { apiPublic } from "../../../../lib/api";
+import { ApiError, apiOptionalAuth } from "../../../../lib/api";
 import { AddToCartButton } from "../../add-to-cart-button";
 
-/** The Detail screen — price/MRP/savings + the "Compare N sources" block (Doc 01/05). */
+/**
+ * The Detail screen — price/MRP/savings + the "Compare N sources" block (Doc 01/05). Real
+ * Zepto skus (`ZEPTO-LIVE-*`) only resolve for the connected account, so this must send the
+ * session token when one exists — `apiPublic` never does, which meant every real product's
+ * detail page 404'd regardless of login state.
+ */
 export default async function ProductDetailPage({
   params,
   searchParams,
@@ -18,7 +24,13 @@ export default async function ProductDetailPage({
 }) {
   const { sku } = await params;
   const { mode = "balanced" } = await searchParams;
-  const product = await apiPublic<ProductOffersResponse>(`/products/${encodeURIComponent(sku)}/offers?mode=${mode}`);
+  let product: ProductOffersResponse;
+  try {
+    product = await apiOptionalAuth<ProductOffersResponse>(`/products/${encodeURIComponent(sku)}/offers?mode=${mode}`);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) notFound();
+    throw err;
+  }
   const best = product.offers[0];
 
   return (

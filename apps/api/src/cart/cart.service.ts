@@ -5,7 +5,7 @@ import type { AddToCartRequest, Cart, CartLine, CartView, SourceProduct } from "
 import { AGGREGATION_GATEWAY } from "../aggregation/aggregation.tokens.js";
 import { AddressesService } from "../addresses/addresses.service.js";
 import { ZeptoOAuthService } from "../zepto/zepto-oauth.service.js";
-import { getRealZeptoProduct } from "../zepto/zepto-mcp-adapter.js";
+import { getCachedRealZeptoProduct } from "../zepto/zepto-mcp-adapter.js";
 import { CART_REPOSITORY } from "./cart.tokens.js";
 
 /**
@@ -112,7 +112,7 @@ export class CartService {
   private async fetchSourceProduct(userId: string, req: AddToCartRequest): Promise<SourceProduct | null> {
     if (req.sourceId === "zepto") {
       const accessToken = await this.zepto.getValidAccessToken(userId);
-      if (accessToken) return getRealZeptoProduct(accessToken, req.sourceProductId);
+      if (accessToken) return getCachedRealZeptoProduct(this.aggregation.cache, accessToken, req.sourceProductId);
     }
     return this.aggregation.getSourceProduct(req.sourceId, req.sourceProductId);
   }

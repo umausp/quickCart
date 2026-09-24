@@ -1,4 +1,5 @@
 import { connectMcpClient, callTool, type FetchLike, type McpClientHandle } from "@quickcart/mcp-toolkit/client";
+import type { CachePort } from "@quickcart/aggregation-core";
 import type { SourceProduct } from "@quickcart/contracts";
 
 /**
@@ -161,4 +162,20 @@ export async function getRealZeptoProduct(accessToken: string, productVariantId:
     null as ZeptoProductDetail | null,
   );
   return detail ? fromProductDetail(detail) : null;
+}
+
+/**
+ * `get_product_details` is a full session handshake against Zepto's real server (same cost as
+ * `search_products`'s), and this ideation build's demo location is fixed, so the result isn't
+ * even user-specific — caching by product id alone (not per-user) is safe and avoids redoing
+ * the whole round trip on every "Add +" tap or detail-page view, which is what made both feel
+ * slow. Shared by the cart (add-item) and product-detail routes.
+ */
+export async function getCachedRealZeptoProduct(cache: CachePort, accessToken: string, productVariantId: string): Promise<SourceProduct | null> {
+  const cacheKey = `zepto-live-product:${productVariantId}`;
+  const cached = await cache.get<SourceProduct>(cacheKey);
+  if (cached) return cached;
+  const product = await getRealZeptoProduct(accessToken, productVariantId);
+  if (product) await cache.set(cacheKey, product, 30);
+  return product;
 }

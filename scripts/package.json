@@ -1,0 +1,22 @@
+{
+  "name": "@quickcart/scripts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "mcp:demo": "tsx mcp-demo.ts",
+    "mcp:checkout-demo": "tsx mcp-checkout-demo.ts",
+    "agg:demo": "tsx aggregation-demo.ts"
+  },
+  "dependencies": {
+    "@quickcart/aggregation-core": "workspace:*",
+    "@quickcart/contracts": "workspace:*",
+    "@quickcart/mcp-toolkit": "workspace:*",
+    "@quickcart/pricing-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.3"
+  }
+}

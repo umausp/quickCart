@@ -5,6 +5,13 @@ export interface ZeptoOAuthConfig {
   tokenUrl: string;
   mcpUrl: string;
   scope: string;
+  /** QuickCart userId whose real Zepto connection backs every visitor who hasn't connected
+   * their own — an explicit, informed choice by that account's owner (see
+   * `ZeptoOAuthService.getValidAccessTokenWithFallback`), not something to add lightly. Not
+   * a secret itself (it's just a lookup key into our own KV; the real bearer token it
+   * resolves to is never exposed to any client), but it does mean anyone who visits this site
+   * without connecting their own account browses using this person's real Zepto data. */
+  defaultOwnerUserId: string | null;
 }
 
 /**
@@ -25,6 +32,10 @@ const DEFAULT_ZEPTO_CONFIG: ZeptoOAuthConfig = {
   tokenUrl: "https://auth.zepto.co.in/token",
   mcpUrl: "https://mcp.zepto.co.in/mcp",
   scope: "tools:read tools:write dev.ucp.shopping.cart:manage",
+  // The QuickCart account that completed the real OAuth handshake first, by explicit request
+  // of that account's owner — every visitor who hasn't connected their own Zepto account sees
+  // real search/product data sourced from this one instead of nothing.
+  defaultOwnerUserId: "8143eb8b-9dad-424b-83f4-ec0ab67bcb85",
 };
 
 /** `env` is required (not read from a global) so this same function works verbatim on
@@ -40,5 +51,6 @@ export function loadZeptoConfig(env: Record<string, string | undefined>): ZeptoO
     tokenUrl: env.ZEPTO_OAUTH_TOKEN_URL ?? DEFAULT_ZEPTO_CONFIG.tokenUrl,
     mcpUrl: env.ZEPTO_OAUTH_MCP_URL ?? DEFAULT_ZEPTO_CONFIG.mcpUrl,
     scope: env.ZEPTO_OAUTH_SCOPE ?? DEFAULT_ZEPTO_CONFIG.scope,
+    defaultOwnerUserId: env.ZEPTO_DEFAULT_OWNER_USER_ID ?? DEFAULT_ZEPTO_CONFIG.defaultOwnerUserId,
   };
 }

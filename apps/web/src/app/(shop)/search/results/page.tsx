@@ -19,7 +19,7 @@ const MODES = [
 
 export default async function SearchResultsPage({ searchParams }: { searchParams: Promise<{ q?: string; mode?: string }> }) {
   const { q = "", mode = "balanced" } = await searchParams;
-  const [response, connected] = await Promise.all([
+  const [response, hasRealData] = await Promise.all([
     apiOptionalAuth<SearchResponse>(`/search?q=${encodeURIComponent(q)}&mode=${mode}&limit=20`),
     isZeptoConnected(),
   ]);
@@ -42,11 +42,11 @@ export default async function SearchResultsPage({ searchParams }: { searchParams
         </Stack>
 
         <Typography variant="caption" color="text.secondary">
-          {response.results.length} result{response.results.length === 1 ? "" : "s"} · {connected ? "live from your connected Zepto account" : "not connected"}
+          {response.results.length} result{response.results.length === 1 ? "" : "s"} · {hasRealData ? "live from Zepto" : "no real data available"}
         </Typography>
 
         {response.results.length === 0 ? (
-          connected ? (
+          hasRealData ? (
             <EmptyState icon="🔍" title="No results" subtitle={`Nothing matched "${q}" on Zepto right now.`} />
           ) : (
             <EmptyState

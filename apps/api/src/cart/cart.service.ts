@@ -102,17 +102,16 @@ export class CartService {
   }
 
   /**
-   * "zepto" resolves to one of two completely different backends depending on the requesting
-   * user (same rule `/v1/search` already applies): a real, personally-connected account gets
-   * a live refetch via the real MCP server; everyone else gets the shared mock retailer. This
-   * is what makes "add to cart" work for a real search result at all — the mock zepto worker
-   * has never heard of a real Zepto `productVariantId` and would 404 on it (which is exactly
-   * what was happening before this existed).
+   * "zepto" resolves through a real connection whenever one is available (same rule
+   * `/v1/search` already applies): the requesting user's own connection first, then the
+   * shared fallback owner's (`ZeptoOAuthConfig.defaultOwnerUserId`) if they have none — never
+   * the mock retailer, which has never heard of a real Zepto `productVariantId` and would 404
+   * on it (which is exactly what was happening before this existed).
    */
   private async fetchSourceProduct(userId: string, req: AddToCartRequest): Promise<SourceProduct | null> {
     if (req.sourceId === "zepto") {
-      const accessToken = await this.zepto.getValidAccessToken(userId);
-      if (accessToken) return getCachedRealZeptoProduct(this.aggregation.cache, accessToken, req.sourceProductId);
+      const zeptoSession = await this.zepto.getValidAccessTokenWithFallback(userId);
+      if (zeptoSession) return getCachedRealZeptoProduct(this.aggregation.cache, zeptoSession.accessToken, req.sourceProductId);
     }
     return this.aggregation.getSourceProduct(req.sourceId, req.sourceProductId);
   }

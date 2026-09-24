@@ -11,12 +11,13 @@ import { weightsForMode } from "./ranking-mode.js";
 
 /**
  * `GET /v1/search` — the List/Search-results screen's one endpoint. No mock data: this only
- * ever returns real MCP results. Today that means a logged-in shopper's real, connected Zepto
- * account (Zepto's own server requires auth for every call, including plain search — confirmed
- * directly against it, not a QuickCart choice); a guest, or anyone not connected, gets an
- * empty result set rather than the old shared demo catalogue. Swiggy will join this list the
- * moment QuickCart has real API access to it (currently blocked on Swiggy's own invite-based
- * application process, not anything this code controls).
+ * ever returns real MCP results. A shopper's own connected Zepto account is used first; a
+ * visitor with none of their own falls back to the shared owner's connection
+ * (`ZeptoOAuthConfig.defaultOwnerUserId` — an explicit, informed choice by that account's
+ * owner, not a default anyone should add lightly). Only when there's no fallback configured
+ * at all does this return an empty result set. Swiggy will join this list the moment
+ * QuickCart has real API access to it (blocked on Swiggy's own invite-based application
+ * process, not anything this code controls).
  */
 @Controller()
 export class SearchController {
@@ -45,14 +46,11 @@ export class SearchController {
 
   private async getValidZeptoSession(authHeader?: string): Promise<{ userId: string; accessToken: string } | null> {
     const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-    if (!token) return null;
-    try {
-      const claims = await this.jwt.verify<JwtClaims>(token);
-      const accessToken = await this.zepto.getValidAccessToken(claims.sub);
-      return accessToken ? { userId: claims.sub, accessToken } : null;
-    } catch {
-      return null;
-    }
+    const claims = token ? await this.jwt.verify<JwtClaims>(token).catch(() => null) : null;
+    // Falls back to the shared owner's connection when this visitor has none of their own —
+    // see ZeptoOAuthConfig.defaultOwnerUserId.
+    const session = await this.zepto.getValidAccessTokenWithFallback(claims?.sub ?? null);
+    return session ? { userId: session.ownerUserId, accessToken: session.accessToken } : null;
   }
 
   /**

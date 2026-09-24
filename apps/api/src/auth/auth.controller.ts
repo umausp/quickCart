@@ -21,4 +21,9 @@ export class AuthController {
   refresh(@Body("refreshToken") refreshToken: string) {
     return this.auth.refresh(refreshToken);
   }
+
+  @Post("anonymous")
+  anonymous() {
+    return this.auth.createAnonymousSession();
+  }
 }

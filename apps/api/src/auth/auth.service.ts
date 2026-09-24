@@ -41,6 +41,22 @@ export class AuthService {
     return this.issueTokens(user);
   }
 
+  /**
+   * A visitor who's never logged in at all — no phone, no Zepto — still needs *some*
+   * QuickCart identity to have their own local cart/addresses. Called by the frontend
+   * middleware on first visit so nobody ever has to see a login screen just to browse; real
+   * product data for this user comes from the shared fallback Zepto connection
+   * (`ZeptoOAuthService.getValidAccessTokenWithFallback`), not from anything tied to them.
+   */
+  async createAnonymousSession(): Promise<AuthTokens> {
+    const user = await this.users.create({
+      phone: `anon:${crypto.randomUUID()}`,
+      name: "Guest",
+      defaultPincode: "560001",
+    });
+    return this.issueTokens(user);
+  }
+
   async refresh(refreshToken: string): Promise<AuthTokens> {
     const record = await this.authState.getRefreshToken(refreshToken);
     if (!record || Date.now() > record.expiresAt) throw new UnauthorizedException({ error: "invalid_refresh_token" });
@@ -56,7 +72,11 @@ export class AuthService {
    * mechanism, two ways to reach it. */
   async issueTokens(user: User): Promise<AuthTokens> {
     const claims: JwtClaims = { sub: user.id, phone: user.phone, name: user.name, deliveryZone: user.defaultPincode };
-    const accessToken = await this.jwt.sign(claims, { expiresIn: "15m" });
+    // 30 days, not the usual short-lived access token: this is a low-stakes ideation demo, and
+    // the real cost of a short TTL here is re-doing Zepto's manual paste-back OAuth flow
+    // constantly during testing. The underlying real Zepto token still auto-refreshes
+    // independently of this (see ZeptoOAuthService.getValidAccessToken).
+    const accessToken = await this.jwt.sign(claims, { expiresIn: "30d" });
     const refreshToken = crypto.randomUUID();
     await this.authState.setRefreshToken(refreshToken, { userId: user.id, expiresAt: Date.now() + REFRESH_TTL_MS });
     return { accessToken, refreshToken, user };

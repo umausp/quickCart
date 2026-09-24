@@ -32,21 +32,20 @@ export function ProductCard({ card, onClick, actionSlot }: { card: SearchResultC
               display: "grid",
               placeItems: "center",
               fontSize: "2.25rem",
-              position: "relative",
               overflow: "hidden",
             }}
           >
             <ProductThumb image={card.image} alt={card.title} fill />
-            <Box sx={{ position: "absolute", top: 8, right: 8 }}>
-              <EtaBadge minutes={best.etaMinutes} />
-            </Box>
           </Box>
           <Typography variant="subtitle2" sx={{ fontWeight: 700, lineHeight: 1.3, minHeight: "2.6em" }}>
             {card.title}
           </Typography>
-          <Typography variant="caption" color="text.secondary">
-            {card.packSize}
-          </Typography>
+          <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between" }}>
+            <Typography variant="caption" color="text.secondary">
+              {card.packSize}
+            </Typography>
+            <EtaBadge minutes={best.etaMinutes} />
+          </Stack>
           <PriceBlock pricePaise={best.pricePaise} mrpPaise={best.mrpPaise} />
           <Typography variant="caption" color="text.secondary">
             Best via {sourceLabel}

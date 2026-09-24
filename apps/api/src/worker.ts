@@ -209,17 +209,14 @@ app.get("/v1/search", async (c) => {
 
   const header = c.req.header("authorization") ?? "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : null;
-  const zeptoSession = token
-    ? await jwt
-        .verify<JwtClaims>(token)
-        .then(async (claims) => {
-          const accessToken = await zepto.getValidAccessToken(claims.sub);
-          return accessToken ? { userId: claims.sub, accessToken } : null;
-        })
-        .catch(() => null)
-    : null;
+  const claims = token ? await jwt.verify<JwtClaims>(token).catch(() => null) : null;
+  // Falls back to the shared owner's connection when this visitor (or a request with no
+  // session at all) has none of their own — see ZeptoOAuthConfig.defaultOwnerUserId.
+  const zeptoSession = await zepto.getValidAccessTokenWithFallback(claims?.sub ?? null);
 
-  const products: SourceProduct[] = zeptoSession ? await cachedSearchRealZepto(aggregation, zeptoSession, q, limit) : [];
+  const products: SourceProduct[] = zeptoSession
+    ? await cachedSearchRealZepto(aggregation, { userId: zeptoSession.ownerUserId, accessToken: zeptoSession.accessToken }, q, limit)
+    : [];
   const sourcesQueried = zeptoSession ? 1 : 0;
 
   return c.json(buildSearchResponse(q, products, sourcesQueried, weightsForMode(c.req.query("mode"))));
@@ -237,15 +234,11 @@ app.get("/v1/products/:sku/offers", async (c) => {
   if (productVariantId) {
     const header = c.req.header("authorization") ?? "";
     const token = header.startsWith("Bearer ") ? header.slice(7) : null;
-    const accessToken = token
-      ? await jwt
-          .verify<JwtClaims>(token)
-          .then((claims) => zepto.getValidAccessToken(claims.sub))
-          .catch(() => null)
-      : null;
-    if (!accessToken) return c.json({ error: "unknown_sku", sku }, 404);
+    const claims = token ? await jwt.verify<JwtClaims>(token).catch(() => null) : null;
+    const zeptoSession = await zepto.getValidAccessTokenWithFallback(claims?.sub ?? null);
+    if (!zeptoSession) return c.json({ error: "unknown_sku", sku }, 404);
 
-    const product = await getCachedRealZeptoProduct(aggregation.cache, accessToken, productVariantId);
+    const product = await getCachedRealZeptoProduct(aggregation.cache, zeptoSession.accessToken, productVariantId);
     if (!product) return c.json({ error: "unknown_sku", sku }, 404);
 
     const meta = { canonicalSku: product.canonicalSku, title: product.title, brand: product.brand, category: product.category, packSize: product.packSize, image: product.image };
@@ -289,6 +282,13 @@ app.post("/v1/auth/refresh", async (c) => {
   const { auth } = buildServices(c.env);
   const { refreshToken } = await c.req.json<{ refreshToken: string }>();
   return c.json(await auth.refresh(refreshToken));
+});
+
+// A visitor with no session at all — called by apps/web's middleware on first visit so
+// nobody has to see a login screen just to browse (see AuthService.createAnonymousSession).
+app.post("/v1/auth/anonymous", async (c) => {
+  const { auth } = buildServices(c.env);
+  return c.json(await auth.createAnonymousSession());
 });
 
 // ---- Real Zepto connection (start/complete are auth-optional — see zepto.controller.ts's

@@ -16,7 +16,7 @@ import { CategoryLink } from "./category-link";
  * only ever come from an explicit search.
  */
 export default async function HomePage() {
-  const connected = await isZeptoConnected();
+  const hasRealData = await isZeptoConnected();
 
   return (
     <Container maxWidth="lg" sx={{ py: 3 }}>
@@ -33,12 +33,12 @@ export default async function HomePage() {
             Everything, in minutes ⚡
           </Typography>
           <Typography variant="body2" sx={{ opacity: 0.9, mb: 2 }}>
-            Real, live results from your connected Zepto account — no demo data.
+            Real, live results from Zepto — no demo data.
           </Typography>
           <SearchBox action="/search/results" placeholder="Search milk, eggs, earbuds…" light />
         </Box>
 
-        {!connected && (
+        {!hasRealData && (
           <Box
             sx={{
               p: 2,
@@ -54,10 +54,11 @@ export default async function HomePage() {
           >
             <Box>
               <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-                Connect your Zepto account
+                Connect a Zepto account
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                QuickCart only shows real data — nothing shows up in search until you connect.
+                QuickCart only shows real data, and no shared account is available right now —
+                connect your own to start browsing.
               </Typography>
             </Box>
             <LinkButton href="/profile" variant="contained">

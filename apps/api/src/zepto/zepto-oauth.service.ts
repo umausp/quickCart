@@ -79,9 +79,20 @@ export class ZeptoOAuthService {
     return this.auth.issueTokens(user);
   }
 
-  async getStatus(userId: string): Promise<{ connected: boolean; connectedAt?: string }> {
+  /**
+   * `connected` is strictly "does *this* user have their own connection" (drives the
+   * Profile page's connect/disconnect button). `hasRealData` is broader — true if real Zepto
+   * data is available to them *at all*, including via the shared fallback owner's connection
+   * — that's what home/search should actually key their "connect to see real data" messaging
+   * off of, since a visitor using the fallback already sees real results without connecting
+   * anything themselves.
+   */
+  async getStatus(userId: string): Promise<{ connected: boolean; connectedAt?: string; hasRealData: boolean }> {
     const connection = await this.connections.getConnection(userId);
-    return connection ? { connected: true, connectedAt: connection.connectedAt } : { connected: false };
+    if (connection) return { connected: true, connectedAt: connection.connectedAt, hasRealData: true };
+    const fallbackUserId = this.config.defaultOwnerUserId;
+    const hasRealData = fallbackUserId && fallbackUserId !== userId ? Boolean(await this.getValidAccessToken(fallbackUserId)) : false;
+    return { connected: false, hasRealData };
   }
 
   async disconnect(userId: string): Promise<void> {
@@ -122,6 +133,29 @@ export class ZeptoOAuthService {
     };
     await this.connections.saveConnection(userId, refreshed);
     return refreshed.accessToken;
+  }
+
+  /**
+   * Same as `getValidAccessToken`, but falls back to the configured shared owner's connection
+   * (`ZeptoOAuthConfig.defaultOwnerUserId`) when `userId` has none of their own — this is what
+   * lets a visitor browse real data without connecting anything, at the explicit, informed
+   * request of whoever owns that fallback connection. `userId` is tried first so the owner's
+   * own browsing is unaffected either way, and so anyone who *does* connect their own account
+   * always sees their own data, never someone else's.
+   *
+   * Returns which userId's connection actually got used, not just the token: callers cache
+   * real-Zepto lookups per connection owner, and every anonymous visitor resolving to the same
+   * shared fallback should share one cache entry, not fragment into one per visitor.
+   */
+  async getValidAccessTokenWithFallback(userId: string | null): Promise<{ ownerUserId: string; accessToken: string } | null> {
+    if (userId) {
+      const own = await this.getValidAccessToken(userId);
+      if (own) return { ownerUserId: userId, accessToken: own };
+    }
+    const fallbackUserId = this.config.defaultOwnerUserId;
+    if (!fallbackUserId || fallbackUserId === userId) return null;
+    const fallback = await this.getValidAccessToken(fallbackUserId);
+    return fallback ? { ownerUserId: fallbackUserId, accessToken: fallback } : null;
   }
 
   get mcpUrl(): string {

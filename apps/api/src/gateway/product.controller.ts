@@ -53,12 +53,10 @@ export class ProductController {
 
   private async getValidZeptoToken(authHeader?: string): Promise<string | null> {
     const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-    if (!token) return null;
-    try {
-      const claims = await this.jwt.verify<JwtClaims>(token);
-      return this.zepto.getValidAccessToken(claims.sub);
-    } catch {
-      return null;
-    }
+    const claims = token ? await this.jwt.verify<JwtClaims>(token).catch(() => null) : null;
+    // Falls back to the shared owner's connection when this visitor has none of their own —
+    // see ZeptoOAuthConfig.defaultOwnerUserId.
+    const session = await this.zepto.getValidAccessTokenWithFallback(claims?.sub ?? null);
+    return session?.accessToken ?? null;
   }
 }

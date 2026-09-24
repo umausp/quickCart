@@ -28,7 +28,9 @@ export async function getSession(): Promise<Session | null> {
 
 export async function setSession(tokens: AuthTokens): Promise<void> {
   const store = await cookies();
-  store.set(ACCESS_COOKIE, tokens.accessToken, { ...baseCookieOpts, maxAge: 60 * 15 });
+  // Matches AuthService.issueTokens' own 30-day JWT expiry — this used to be 15 minutes,
+  // which meant the *cookie* expired long before the (still-valid) JWT inside it did.
+  store.set(ACCESS_COOKIE, tokens.accessToken, { ...baseCookieOpts, maxAge: 60 * 60 * 24 * 30 });
   store.set(REFRESH_COOKIE, tokens.refreshToken, { ...baseCookieOpts, maxAge: 60 * 60 * 24 * 30 });
 }
 
